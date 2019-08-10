@@ -10,3 +10,7 @@ last_night: 2025-01-01
 # Parameters for the cutout
 cutout_size: 200 # pixel
 
+# Library to be used in the calibration
+stdlib: hststan
+
+
