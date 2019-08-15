@@ -5,140 +5,102 @@ Created on 01/12/17
 
 Author : Carlos Eduardo Barbosa
 
-Calibration of standard stars.
+Determination of solution for photometric calibration.
 
 """
 from __future__ import print_function, division
 
 import os
+import sys
+import yaml
 
 import numpy as np
 import astropy.units as u
 from astropy.io import ascii
-from astropy.table import Table, vstack, join
+from astropy.table import Table, vstack, join, hstack
 import speclite.filters
-import pymc3
+import pymc3 as pm
 
 import context
-import misc
 
-def splus_mag_std_stars(stars, library="ctiostan"):
-    """ Obtain magnitudes of """
-    specdir = os.path.join(context.data_dir, "ststars", library)
-    photsys = load_splus_filters()
-    mags = {}
-    for star in stars:
-        specfile = os.path.join(specdir, "f{}.dat".format(star))
-        if not os.path.exists(specfile):
-            continue
-        wave, flux = np.loadtxt(specfile, usecols=(0,1), unpack=True)
-        wave = wave * u.AA
-        flux = flux * (10 ** -16) * u.erg / u.cm / u.cm / u.s / u.AA
-        m = photsys.get_ab_magnitudes(flux, wave, mask_invalid=True)
-        mags[star] = m
-    return mags
-
-def load_splus_filters():
-    """ Use speclite to load SPLUS filters for convolution. """
-    filters_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                               "tables/filter_curves-master")
-    ftable = ascii.read(os.path.join(context.tables_dir,
-                                     "filter_lam_filename.txt"))
+def load_java_system(version):
+    """ Use speclite to load Javalambre's SPLUS filters for convolution. """
+    tables_dir = os.path.join(os.path.split(os.path.realpath(__file__))[0],
+                               "tables")
+    filters_dir = os.path.join(tables_dir, "filter_curves", version)
+    ftable = ascii.read(os.path.join(tables_dir, "filter_lam_filename.txt"))
     filternames = []
     for f in ftable:
+        filtname = f["filter"]
         fname = os.path.join(filters_dir, f["filename"])
         fdata = np.loadtxt(fname)
         fdata = np.vstack(((fdata[0,0]-1, 0), fdata, (fdata[-1,0]+1, 0)))
         w = fdata[:,0] * u.AA
         response = np.clip(fdata[:,1], 0., 1.)
         speclite.filters.FilterResponse(wavelength=w,
-                  response=response, meta=dict(group_name="splus",
-                  band_name=f["filter"]))
-        filternames.append("splus-{}".format(f["filter"]))
-    splus = speclite.filters.load_filters(*filternames)
-    return splus
+                  response=response, meta=dict(group_name="java",
+                  band_name=filtname.upper()))
+        filternames.append("java-{}".format(filtname))
+    java = speclite.filters.load_filters(*filternames)
+    return java
 
-def model_zps(tab, flux_key="FLUX_AUTO", redo=False):
-    """ Simple plot of the magnitude difference as a function of the airmass."""
-    model = splus_mag_std_stars(stars)
-    idx = sorted(np.arange(len(tab)), key=lambda i: tab["DATE"][i])
-    tab = tab[idx]
-    dates_str = "{}_{}".format(tab["DATE"][0], tab["DATE"][-1])
-    for j, band in enumerate(context.bands):
-        if j in [0,11]:
+def get_splus_magnitudes(stars, library, filter_curves):
+    """ Obtain magnitude of stars used in the calibration in the
+    S-PLUS system. """
+    stds_dir = os.path.join(os.path.split(os.path.realpath(__file__))[0],
+                               "tables/stdstars", library)
+    java = load_java_system(filter_curves)
+    mags = {}
+    for star in stars:
+        specfile = os.path.join(stds_dir, "f{}.dat".format(star))
+        if not os.path.exists(specfile):
             continue
-        # Getting data for a given filter
-        idx = np.where(tab["FILTER"] == band)
-        data = tab[idx]
-        ########################################################################
-        # Producing row with model magnitudes
-        M = np.zeros(len(data), dtype=float)
-        for star in set(data["STAR"]):
-            idx = np.where(data["STAR"]==star)
-            M[idx] = model[star]["splus-{}".format(band)]
-        ########################################################################
-        data["M"] = M
-        data["m"] = misc.mag(np.array(data[flux_key]).T / data["EXPTIME"])
-        # Producing observed magnitudes
-        idx = np.isfinite(data["M"] - data["m"])
-        data = data[idx]
-        if len(data) == 0:
-            continue
-        bayesian_hierarchical_single_band(data, band, dates_str, redo=redo)
+        wave, flux = np.loadtxt(specfile, usecols=(0,1), unpack=True)
+        wave = wave * u.AA
+        flux = flux * (10 ** -16) * u.erg / u.cm / u.cm / u.s / u.AA
+        m = java.get_ab_magnitudes(flux, wave, mask_invalid=True)
+        mags[star] = m
+    return mags
 
-def bayesian_hierarchical_single_band(data, band, epoch, redo=False):
-    """ Hierarchical Bayesian model with pooled data.
-
-    Source: http://docs.pymc.io/notebooks/multilevel_modeling.html
-
+def single_band_calib(data, outdb, redo=False):
+    """ Determining zero points for single band data.
     """
-    outdir = os.path.join(context.home_dir, "zps", epoch)
-    if not os.path.exists(outdir):
-        os.mkdir(outdir)
-    outfile = os.path.join(outdir,
-                          "zp_{}_{}.fits".format(flux_key, band))
-    outfile2 = os.path.join(outdir, "summary_{}_{}.csv".format(flux_key, band))
-    if os.path.exists(outfile) and not redo:
+    if os.path.exists(outdb) and not redo:
         return
     data = data.to_pandas()
     nights = list(data.DATE.unique())
     nights_lookup = dict(zip(nights, range(len(nights))))
     data["night"] = data.DATE.copy()
     data['night'] = data.night.replace(nights_lookup).values
-    with pymc3.Model():
+    N = len(nights)
+    with pm.Model():
         # Hyperpriors
-        mu_a = pymc3.Normal('ZP', mu=20., sd=2)
-        sigma_a = pymc3.HalfCauchy('ZPsigma', 5)
-        mu_b = pymc3.Normal('Kappa', mu=0., sd=1)
-        sigma_b = pymc3.HalfCauchy(r'Kappasigma', 5)
+        Mzp = pm.Normal('Mzp', mu=20., sd=2)
+        Szp = pm.HalfCauchy('Szp', 5)
+        Mkappa = pm.Normal('Mkappa', mu=0., sd=1)
+        Skappa = pm.HalfCauchy(r'Skappa', 5)
         # Randon intercepts
-        zp = pymc3.Cauchy("zp", alpha=mu_a, beta=sigma_a, shape=len(
-            nights))
+        zp = pm.Cauchy("zp", alpha=Mzp, beta=Szp, shape=N)
         # Common slope
-        kappa = pymc3.Cauchy(r"kappa", alpha=mu_b, beta=sigma_b, shape=len(
-            nights))
+        kappa = pm.Cauchy(r"kappa", alpha=Mkappa, beta=Skappa, shape=N)
         # Model error
-        eps = pymc3.HalfCauchy(r"eps", 5)
+        eps = pm.HalfCauchy(r"eps", 5)
         # Expected value
         linear_regress = zp[data["night"]] - kappa[data["night"]] * data[
             "AIRMASS"]
-        pymc3.Cauchy('y', alpha=linear_regress, beta=eps,
-                         observed=data["M"]-data["m"])
-        trace = pymc3.sample()
-        df = pymc3.stats.summary(trace)
-        df.to_csv(outfile2)
+        pm.Cauchy('y', alpha=linear_regress, beta=eps, observed=data["DELTAMAG"])
+        trace = pm.sample()
+    pm.save_trace(trace, outdb, overwrite=True)
     summary = []
     for night, idx in nights_lookup.items():
         t = Table([[night], [np.mean(trace["zp"][:, idx])],
                    [np.std(trace["zp"][:, idx])],
                    [np.mean(trace["kappa"][:, idx])],
                    [np.std(trace["kappa"][:, idx])]],
-                  names=["date", "{}_zp".format(band),
-                         "{}_zperr".format(band), "{}_kappa".format(
-                          band), "{}_kappaerr".format(band)])
+                  names=["date", "zp", "zperr", "kappa", "kappaerr"])
         summary.append(t)
     summary = vstack(summary)
-    summary.write(outfile, overwrite=True, format="fits")
+    summary.write("{}.txt".format(outdb), overwrite=True, format="ascii")
     return
 
 def merge_zp_tables(redo=False):
@@ -174,37 +136,64 @@ def merge_zp_tables(redo=False):
     print("Do not forget to upload the current version of the zeropoints!")
     return etables
 
+def main():
+    config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
+    if len(config_files) == 0:
+        print("Configuration file not found. Using default configurations.")
+        config_files.append("config_mode5.yaml")
+    for filename in config_files:
+        with open(filename) as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        phot_file = os.path.join(config["output_dir"],
+                                "phottable_{}.fits".format(config["name"]))
+        phot = Table.read(phot_file)
+        ########################################################################
+        # Remove flagged stars
+        flagged_stars = [_.lower().replace(" ", "") for _ in config[
+            "flagged_stars"]]
+        badidx = []
+        for fstar in flagged_stars:
+            idx = np.where(phot["STAR"]==fstar)[0]
+            badidx.append(idx)
+        badidx = np.hstack(badidx)
+        goodidx = np.arange(len(phot))
+        goodidx = np.delete(goodidx, badidx)
+        phot = phot[goodidx]
+        ########################################################################
+        # Add columns to the photometry table containing the model magnitudes
+        stars = set(phot["STAR"])
+        model_mags = get_splus_magnitudes(stars, config["stdlib"],
+                                          config["filters_version"])
+        modelmag = np.zeros(len(phot)) * np.nan
+        for star in stars:
+            if star not in model_mags:
+                print("Star not found in database: {}".format(star))
+                continue
+            for band in context.bands:
+                fname = "java-{}".format(band)
+                idx = np.where((phot["STAR"]==star) & (phot["FILTER"]==band))[0]
+                modelmag[idx] = float(model_mags[star][fname])
+        phot["MODELMAG"] = modelmag
+        phot["OBSMAG"] = -2.5 * np.log10(phot["FLUX_APER"] / phot["EXPTIME"])
+        phot["DELTAMAG"] = phot["MODELMAG"] - phot["OBSMAG"]
+        ########################################################################
+        # Removing problematic lines
+        phot = phot[np.isfinite(phot["DELTAMAG"])]
+        dbs_dir = os.path.join(config["output_dir"],
+                               "zps_{}".format(config["name"]))
+        if not os.path.exists(dbs_dir):
+            os.mkdir(dbs_dir)
+        for band in context.bands:
+            idx = np.where(band == phot["FILTER"])[0]
+            if len(idx) == 0:
+                continue
+            outdb = os.path.join(dbs_dir, band)
+            data = phot[idx]
+            single_band_calib(data, outdb)
+
+
 
 if __name__ == "__main__":
-    phottable = os.path.join(context.home_dir, "tables/extmoni_phot.fits")
-    phot = Table.read(phottable, format="fits")
-    stars = [_.lower().replace(" ", "") for _ in phot["STAR"]]
-    phot["STAR"] = stars
-    stars = list(set(stars))
-    nights = list(set(phot["DATE"]))
-    ############################################################################
-    # Cleaning sample using distance in the coordinate matching and Sextractor
-    # flags
-    phot = phot[phot["D2D"] < 10]
-    phot = phot[phot["FLAGS"] == 0]
-    ############################################################################
-    # Removing problematic stars
-    flagged_stars = ["ltt377", "ltt3218", "ltt4364", "cd-32_9927", "hr7950",
-                     "hr4468"]
-    badidx = []
-    for fstar in flagged_stars:
-        badidx.append(np.where(phot["STAR"]==fstar))
-    badidx = np.hstack(badidx)[0]
-    goodidx = np.arange(len(phot))
-    goodidx = np.delete(goodidx, badidx)
-    phot = phot[goodidx]
-    ############################################################################
-    sample_table = os.path.join(context.home_dir, "zps/sample.fits")
-    print("Calibrating using a sample of {} stars.".format(len(phot)))
-    phot.write(sample_table, overwrite=True)
-    for flux_key in ["FLUX_AUTO", "FLUX_ISO", "FLUXAPERCOR"]:
-        phot_old = phot[phot["DATE"] <= "2017-12-14"]
-        phot_new = phot[phot["DATE"] > "2017-12-14"]
-        model_zps(phot_old, redo=False, flux_key=flux_key)
-        model_zps(phot_new, redo=False, flux_key=flux_key)
-    table = merge_zp_tables(redo=True)
+    main()
+
+#     table = merge_zp_tables(redo=True)
