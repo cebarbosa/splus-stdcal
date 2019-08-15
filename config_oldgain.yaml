@@ -1,9 +1,0 @@
-# Configuration of directories 
-singles_dir: /mnt/jype/MainSurvey/reduced
-tiles_dir: /mnt/jype/MainSurvey/tiles/T01
-output_dir: /mnt/public/kadu/stdcal
-
-# Select interval of nights used in the calibration
-first_night: 2016-06-06
-last_night: 2017-12-14
-

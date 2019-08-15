@@ -34,7 +34,7 @@ def convolve2splus(wave, flux):
 
     """
     filters_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                               "tables/filter_curves-master")
+                               "tables/filter_curves-dr1")
     filenames = sorted([_ for _ in os.listdir(filters_dir) if
                         _.endswith("dat")])
     cAAs = constants.c.to(u.AA / u.s).value
