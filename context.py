@@ -8,32 +8,23 @@ Created on 27/09/2017
 Paths used in this project.
 
 """
-import os
-import platform
-
 import astropy.units as u
 import matplotlib.pyplot as plt
 
-if platform.node() == "kadu-Inspiron-5557":
-    home_dir = "/home/kadu/Dropbox/SPLUS/stdcal"
-    # Matplotlib settings
-    plt.style.context("seaborn-paper")
-    plt.rcParams["text.usetex"] = True
-    plt.rcParams["font.family"] = "serif"
-    plt.rcParams['font.serif'] = 'Computer Modern'
-    plt.rcParams["xtick.direction"] = "in"
-    plt.rcParams["ytick.direction"] = "in"
-    plt.rcParams["xtick.minor.visible"] = True
-    plt.rcParams["ytick.minor.visible"] = True
-    plt.rcParams["xtick.top"] = True
-    plt.rcParams["ytick.right"] = True
-    # plt.style.use("seaborn-paper")
 
-else:
-    home_dir = "/mnt/public/kadu/stdcal"
-data_dir = os.path.join(home_dir, "data")
-tables_dir = os.path.join(home_dir, "tables")
-plots_dir = os.path.join(home_dir, "plots")
+# Matplotlib settings
+plt.style.context("seaborn-paper")
+plt.rcParams["text.usetex"] = True
+plt.rcParams["font.family"] = "serif"
+plt.rcParams['font.serif'] = 'Computer Modern'
+plt.rcParams["xtick.direction"] = "in"
+plt.rcParams["ytick.direction"] = "in"
+plt.rcParams["xtick.minor.visible"] = True
+plt.rcParams["ytick.minor.visible"] = True
+plt.rcParams["xtick.top"] = True
+plt.rcParams["ytick.right"] = True
+# plt.style.use("seaborn-paper")
+
 
 ps = 0.55 * u.arcsec / u.pixel
 
