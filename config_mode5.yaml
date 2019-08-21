@@ -26,10 +26,10 @@ filters_version: dr1 # dr1 or dr2
 # List of problematic stars that should be skipped in the calibration
 # Names are case insensitive
 flagged_stars:
-- "LTT 377" # High proper-motion star
-- "LTT 3218" # White Dwarf
-- "LTT 4364" #  White Dwarf
-- "CD-32_9927" 
+#- "LTT 377" # High proper-motion star
+#- "LTT 3218" # White Dwarf
+#- "LTT 4364" #  White Dwarf
+#- "CD-32_9927"
 - "HR 7950" # * eps Aqr, mag~3, probably saturated
 - "HR 4468" # * tet Crt, High proper-motion Star, mag~4.6, probably saturated
 
