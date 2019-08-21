@@ -19,9 +19,11 @@ from astropy.io import fits
 from astropy.table import Table, hstack, vstack
 from astropy.nddata.utils import Cutout2D
 from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 from astroquery.vizier import Vizier
-import sewpy
 from tqdm import tqdm
+
+import sip_tpv
 
 def select_nights(config):
     """ Select all nights in the configuration file range. """
@@ -39,13 +41,13 @@ def select_nights(config):
             nights.append(direc)
     return nights
 
-def get_standard_data(nights, data_dir, outdir_root, redo=False,
+def make_std_cutout(nights, data_dir, outdir_root, redo=False,
                       skip_existing_nights=True, cutout_size=None):
     """ Search for catalogs and get catalog information for standard stars. """
     print("Initial number of nights: {}".format(len(nights)))
-    catalog = "I/345/gaia2"
+
     header_keys = ["OBJECT", "FILTER", "EXPTIME", "GAIN", "TELESCOP",
-                   "INSTRUME"]
+                   "INSTRUME", "AIRMASS"]
     # Skip all processing related to nights already processed before
     # That makes the processing much faster if we just need to update the
     # analysis for new observing nights
@@ -53,7 +55,7 @@ def get_standard_data(nights, data_dir, outdir_root, redo=False,
         nights = [_ for _ in nights if not os.path.exists(os.path.join(
                   outdir_root, _))]
     print("Total nights to be processed in this run: {}".format(len(nights)))
-    for i, night in enumerate(nights):
+    for i, night in enumerate(nights[::-1]):
         print("Processing EXTMONI images of date {} ({}/{})".format(night,
               i+1, len(nights)))
         outdir = os.path.join(outdir_root, night)
@@ -78,37 +80,25 @@ def get_standard_data(nights, data_dir, outdir_root, redo=False,
                 os.mkdir(outdir)
             # Find coordinates of standard star using Vizier
             h = fits.getheader(os.path.join(path, img))
+            sip_tpv.pv_to_sip(h)
+            wcs = WCS(h, relax=True)
             obj = h["object"]
-            q = Vizier.query_object(obj, catalog=catalog)[catalog]
-            starcoords = SkyCoord(q["RA_ICRS"].mean(), q["DE_ICRS"].mean(),
+            q = Vizier.query_object(obj, catalog="II/246")[0]
+            starcoords = SkyCoord(ra=q["RAJ2000"].mean(),
+                                  dec=q["DEJ2000"].mean(),
                                   unit=(u.degree, u.degree))
-            # Find line in the catalog containing the information of star
-            catdata = Table.read(cat, hdu=2)
-            catcoords = SkyCoord(catdata["ALPHA_J2000"],
-                                 catdata["DELTA_J2000"],
-                                 unit=(u.degree, u.degree))
-            idx, d2d, d3d = starcoords.match_to_catalog_sky(catcoords)
-            stardata = catdata[idx]
-            # Add information from the header to the catalog line
-            t = Table()
-            t["IMAGE"] = [img.split("_proc")[0]]
-            t["DATE"] = [night]
-            t["STAR"] = [obj]
-            t["FILTER"] = h["filter"]
-            t["AIRMASS"] = h["airmass"]
-            t["EXPTIME"] = h["exptime"]
-            t["D2D"] = [d2d.to("arcsec")]
-            cat = hstack([stardata, t])
-            cat.write(outcat, format="fits", overwrite=True)
+            x0, y0 = wcs.all_world2pix(starcoords.ra, starcoords.dec, 1)
             # Make cutout
             imgout = os.path.join(outdir, "{}_stamp.fits".format(
                                   img.split("_proc")[0]))
             data = fits.getdata(os.path.join(path, img))
-            cutout = Cutout2D(data, position=(cat["X_IMAGE"], cat["Y_IMAGE"]),
-                              size=cutout_size * u.pixel)
-            hdu = fits.ImageHDU(cutout.data)
+            cutout = Cutout2D(data, position=(x0, y0),
+                              size=cutout_size * u.pixel, wcs=wcs)
+            hdu = fits.ImageHDU(cutout.data, header=cutout.wcs.to_header())
             for key in header_keys:
                 hdu.header[key] = h[key]
+            hdu.header["IMAGE"] = img.split("_proc")[0]
+            hdu.header["DATE"] = night
             hdu.writeto(imgout, overwrite=True)
 
 def run_sextractor(data_dir, nights, coords, redo=False):
@@ -141,7 +131,8 @@ def run_sextractor(data_dir, nights, coords, redo=False):
 
 def join_tables(data_dir, nights, output, redo=True):
     """ Join standard star catalogs into one table. """
-    metafields = ["DATE", "IMAGE", "STAR", "FILTER", "AIRMASS", "EXPTIME"]
+    metafields = ["DATE", "IMAGE", "STAR", "FILTER", "AIRMASS", "EXPTIME",
+                  "D2D"]
     photfields = ["FLUX_APER", "FLUXERR_APER"]
     outtable = []
     print("Loading tables...")
@@ -185,13 +176,14 @@ def main():
         extmoni_dir = os.path.join(config["output_dir"], "extmoni")
         if not os.path.exists(extmoni_dir):
             os.mkdir(extmoni_dir)
-        get_standard_data(nights, config["singles_dir"], extmoni_dir,
+        make_std_cutout(nights, config["singles_dir"], extmoni_dir,
                           cutout_size=config["cutout_size"])
-        starcoords = np.ones(2) * config["cutout_size"] * 0.5
+        starcoords = np.ones(2) * config["cutout_size"] * 0.55
         run_sextractor(extmoni_dir, nights, starcoords, redo=config["sex_redo"])
-        outtable = os.path.join(config["output_dir"],
-                                "phottable_{}.fits".format(config["name"]))
-        join_tables(extmoni_dir, nights, outtable)
+
+        # outtable = os.path.join(config["output_dir"],
+        #                         "phottable_{}.fits".format(config["name"]))
+        # join_tables(extmoni_dir, nights, outtable)
     print("Done!")
 
 if __name__ == "__main__":
