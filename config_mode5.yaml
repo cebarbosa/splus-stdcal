@@ -4,8 +4,8 @@ name: mode5
 # Configuration of directories
 singles_dir: /mnt/jype/MainSurvey/reduced
 tiles_dir: /mnt/jype/MainSurvey/tiles/T01
-#output_dir: /mnt/public/kadu/stdcal
-output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
+output_dir: /mnt/public/kadu/stdcal
+#output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
 
 # Select interval of nights used in the calibration
 first_night: 2017-12-15
