@@ -11,6 +11,7 @@ from __future__ import print_function, division
 import os
 import sys
 import yaml
+from subprocess import call
 from datetime import datetime
 
 import numpy as np
@@ -22,7 +23,6 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy.wcs import WCS
 from tqdm import tqdm
-import sewpy
 
 import sip_tpv
 
@@ -56,7 +56,7 @@ def make_std_cutout(nights, data_dir, outdir_root, redo=False,
         nights = [_ for _ in nights if not os.path.exists(os.path.join(
                   outdir_root, _))]
     print("Total nights to be processed in this run: {}".format(len(nights)))
-    for i, night in enumerate(nights[::-1]):
+    for i, night in enumerate(nights):
         print("Processing EXTMONI images of date {} ({}/{})".format(night,
               i+1, len(nights)))
         outdir = os.path.join(outdir_root, night)
@@ -79,21 +79,25 @@ def make_std_cutout(nights, data_dir, outdir_root, redo=False,
             h = fits.getheader(os.path.join(path, img))
             sip_tpv.pv_to_sip(h)
             wcs = WCS(h, relax=True)
-            obj = h["object"].strip().lower()
+            obj = h["object"].replace(" ", "").lower()
             coords = stdcoords[np.where(obj==stdcoords["STAR"])[0]]
             starcoords = SkyCoord(ra=coords["RA_ICRS"], dec=coords["DE_ICRS"],
                                    distance=coords["distance"],
                                   pm_ra_cosdec=coords['pmRA'],
                                   pm_dec=coords['pmDE'],
                                   obstime=Time(2015.5, format='decimalyear'))
+
             c = starcoords.apply_space_motion(new_obstime=Time(night))
             x0, y0 = wcs.all_world2pix(c.ra, c.dec, 1)
             # Make cutout
             imgout = os.path.join(outdir, "{}_stamp.fits".format(
                                   img.split("_proc")[0]))
             data = fits.getdata(os.path.join(path, img))
-            cutout = Cutout2D(data, position=(x0, y0),
-                              size=cutout_size * u.pixel, wcs=wcs)
+            try:
+                cutout = Cutout2D(data, position=(x0, y0),
+                                  size=cutout_size * u.pixel, wcs=wcs)
+            except:
+                continue
             hdu = fits.ImageHDU(cutout.data, header=cutout.wcs.to_header())
             for key in header_keys:
                 hdu.header[key] = h[key]
@@ -101,41 +105,45 @@ def make_std_cutout(nights, data_dir, outdir_root, redo=False,
             hdu.header["DATE"] = night
             hdu.writeto(imgout, overwrite=True)
 
-def run_sextractor(data_dir, nights, coords, redo=False):
+def run_sextractor(data_dir, nights, redo=False):
     """ Runs SExtractor on stamps of standard stars. """
     config_dir = os.path.split(os.path.realpath(__file__))[0]
     sex_config_file = os.path.join(config_dir, "stdcal.sex")
     sex_params_file = os.path.join(config_dir, "stdcal.param")
-    header_keys = ["OBJECT", "FILTER", "EXPTIME", "GAIN", "TELESCOP",
-                   "INSTRUME", "AIRMASS", "IMAGE", "DATE"]
-    with open(sex_params_file) as f:
-        sexpars = [_.strip() for _ in f.readlines()]
+    filter_file = os.path.join(config_dir, "gauss_3.0_5x5.conv")
+    starnnw_file = os.path.join(config_dir, "default.nnw")
     for i, night in enumerate(nights):
         print("Running SExtractor on night {} ({}/{})".format(night, i+1,
                                                               len(nights)))
         wdir = os.path.join(data_dir, night)
         stamps = [_ for _ in os.listdir(wdir) if _.endswith("stamp.fits")]
-        sew = sewpy.SEW(sexpath="sextractor", configfilepath=sex_config_file,
-                        workdir=wdir, params=sexpars, loglevel="CRITICAL",
-                        nice=19)
         for stamp in tqdm(stamps):
             imgfile = os.path.join(data_dir, night, stamp)
-            h = fits.getheader(imgfile, hdu=2)
-            x0, y0 = h["NAXIS1"], h["NAXIS2"]
             sexcat = imgfile.replace(".fits", ".cat")
             if os.path.exists(sexcat) and not redo:
                 continue
-            cat = sew(imgfile)["table"]
-            rsep = np.sqrt((cat["X_IMAGE"] - x0)**2 + (cat["Y_IMAGE"] - y0)**2)
-            idx = np.argmin(rsep)
-            if rsep[idx] <= 4:
-                cat = Table(cat[idx])
-                for key in header_keys:
-                    cat[key] = h[key]
-                cat.write(sexcat, overwrite=True)
+            call(["sextractor", imgfile, "-c", sex_config_file,
+                  "-PARAMETERS_NAME", sex_params_file,
+                  "-FILTER_NAME", filter_file, "-STARNNW_NAME", starnnw_file,
+                  "-CATALOG_NAME", sexcat])
+
+            # h = fits.getheader(imgfile, ext=1)
+            # x0, y0 = h["NAXIS1"], h["NAXIS2"]
+            # cat = sew(imgfile)
+            # print(cat)
+            # input()
+            # rsep = np.sqrt((cat["X_IMAGE"] - x0)**2 + (cat["Y_IMAGE"] - y0)**2)
+            # idx = np.argmin(rsep)
+            # if rsep[idx] <= 4:
+            #     cat = Table(cat[idx])
+            #     for key in header_keys:
+            #         cat[key] = h[key]
+            #     cat.write(sexcat, overwrite=True)
 
 def join_tables(data_dir, nights, output, redo=True):
     """ Join standard star catalogs into one table. """
+    header_keys = ["OBJECT", "FILTER", "EXPTIME", "GAIN", "TELESCOP",
+                   "INSTRUME", "AIRMASS", "IMAGE", "DATE"]
     hfields = ["DATE", "IMAGE", "STAR", "FILTER", "AIRMASS", "EXPTIME"]
     photfields = ["FLUX_APER", "FLUXERR_APER"]
     outtable = []
@@ -163,8 +171,9 @@ def join_tables(data_dir, nights, output, redo=True):
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
     if len(config_files) == 0:
-        print("Configuration file not found. Using default configurations.")
-        config_files.append("config_mode5.yaml")
+        default_file = "config_mode5.yaml"
+        print("Using default config file ({})".format(default_file))
+        config_files.append(default_file)
     for filename in config_files:
         with open(filename) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
@@ -176,13 +185,13 @@ def main():
         nights = [night for night in nights if
                   any(s.startswith("EXTMONI") and s.endswith("_proc.fits")
                for s in os.listdir(os.path.join(config["singles_dir"], night)))]
+        nights = sorted(nights)
         extmoni_dir = os.path.join(config["output_dir"], "extmoni")
         if not os.path.exists(extmoni_dir):
             os.mkdir(extmoni_dir)
         make_std_cutout(nights, config["singles_dir"], extmoni_dir,
                           cutout_size=config["cutout_size"])
-        starcoords = np.ones(2) * config["cutout_size"] * 0.55
-        run_sextractor(extmoni_dir, nights, starcoords, redo=config["sex_redo"])
+        run_sextractor(extmoni_dir, nights, redo=config["sex_redo"])
 
         # outtable = os.path.join(config["output_dir"],
         #                         "phottable_{}.fits".format(config["name"]))
