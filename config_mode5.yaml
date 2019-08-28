@@ -17,6 +17,9 @@ cutout_size: 200 # pixel
 # Sextractor-related configurations
 sex_redo: False # Option to overwrite sextractor catalog
 
+# Tolerance of matching in the coordinates
+rtol: 5 # pixel
+
 # Library to be used in the calibration
 stdlib: ctiostan # ctiostan, hststan, okestan, wdstan
 
