@@ -112,12 +112,11 @@ def run_sextractor(data_dir, nights, redo=False):
     sex_params_file = os.path.join(config_dir, "stdcal.param")
     filter_file = os.path.join(config_dir, "gauss_3.0_5x5.conv")
     starnnw_file = os.path.join(config_dir, "default.nnw")
-    for i, night in enumerate(nights):
-        print("Running SExtractor on night {} ({}/{})".format(night, i+1,
-                                                              len(nights)))
+    print("Running SExtractor...")
+    for i, night in enumerate(tqdm(nights)):
         wdir = os.path.join(data_dir, night)
         stamps = [_ for _ in os.listdir(wdir) if _.endswith("stamp.fits")]
-        for stamp in tqdm(stamps):
+        for stamp in stamps:
             imgfile = os.path.join(data_dir, night, stamp)
             sexcat = imgfile.replace(".fits", ".cat")
             if os.path.exists(sexcat) and not redo:
@@ -127,46 +126,38 @@ def run_sextractor(data_dir, nights, redo=False):
                   "-FILTER_NAME", filter_file, "-STARNNW_NAME", starnnw_file,
                   "-CATALOG_NAME", sexcat])
 
-            # h = fits.getheader(imgfile, ext=1)
-            # x0, y0 = h["NAXIS1"], h["NAXIS2"]
-            # cat = sew(imgfile)
-            # print(cat)
-            # input()
-            # rsep = np.sqrt((cat["X_IMAGE"] - x0)**2 + (cat["Y_IMAGE"] - y0)**2)
-            # idx = np.argmin(rsep)
-            # if rsep[idx] <= 4:
-            #     cat = Table(cat[idx])
-            #     for key in header_keys:
-            #         cat[key] = h[key]
-            #     cat.write(sexcat, overwrite=True)
-
-def join_tables(data_dir, nights, output, redo=True):
+def join_tables(data_dir, nights, output, rtol=5, redo=True):
     """ Join standard star catalogs into one table. """
-    header_keys = ["OBJECT", "FILTER", "EXPTIME", "GAIN", "TELESCOP",
-                   "INSTRUME", "AIRMASS", "IMAGE", "DATE"]
-    hfields = ["DATE", "IMAGE", "STAR", "FILTER", "AIRMASS", "EXPTIME"]
-    photfields = ["FLUX_APER", "FLUXERR_APER"]
+    header_keys = ["DATE", "IMAGE", "OBJECT", "FILTER", "EXPTIME", "GAIN",
+                   "AIRMASS"]
+    print("Loading table data...")
     outtable = []
-    print("Loading tables...")
     for night in tqdm(nights):
         wdir = os.path.join(data_dir, night)
-        stamps = [_ for _ in os.listdir(wdir) if _.endswith("stamp.fits")]
+        stamps = sorted([_ for _ in os.listdir(wdir) if
+                         _.endswith("stamp.fits")])
         for stamp in stamps:
-            cat = stamp.replace(".fits", ".cat")
-            if not os.path.exists(os.path.join(wdir, cat)):
+            stampfile = os.path.join(wdir, stamp)
+            catfile = stampfile.replace(".fits", ".cat")
+            if not os.path.exists(os.path.join(wdir, catfile)):
                 continue
-            t1 = Table.read(os.path.join(wdir, table), format="fits")[
-                hfields]
-            t2 = Table.read(os.path.join(wdir, phottable), format="fits")[
-                photfields]
-            outtable.append(hstack([t1, t2]))
+            h = fits.getheader(stampfile, ext=1)
+            x0, y0 = 0.5 * h["NAXIS1"], 0.5 * h["NAXIS2"]
+            cat = Table.read(catfile, hdu=2)
+            sep = np.sqrt((cat["X_IMAGE"] - x0)**2 + (cat["Y_IMAGE"] - y0)**2)
+            idx = np.argmin(sep)
+            cat = cat[idx]
+            if sep[idx] > rtol:
+                continue
+            meta = Table([[h[key]] for key in header_keys], names=header_keys)
+            t = hstack([meta, cat])
+            outtable.append(t)
     print("Joining tables and saving the results...")
     outtable = vstack(outtable)
-    # Fix the name of the stars
-    stars = [_.lower().replace(" ", "") for _ in outtable["STAR"]]
-    outtable["STAR"] = stars
+    outtable.rename_column("OBJECT", "STAR")
+    outtable["STAR"] = [_.lower().replace(" ", "") for _ in outtable["STAR"]]
     outtable.write(output, format="fits", overwrite=True)
-    return output
+    return
 
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
@@ -193,9 +184,9 @@ def main():
                           cutout_size=config["cutout_size"])
         run_sextractor(extmoni_dir, nights, redo=config["sex_redo"])
 
-        # outtable = os.path.join(config["output_dir"],
-        #                         "phottable_{}.fits".format(config["name"]))
-        # join_tables(extmoni_dir, nights, outtable)
+        outtable = os.path.join(config["output_dir"],
+                                "phottable_{}.fits".format(config["name"]))
+        join_tables(extmoni_dir, nights, outtable, rtol=config["rtol"])
     print("Done!")
 
 if __name__ == "__main__":
