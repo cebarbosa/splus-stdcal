@@ -144,6 +144,8 @@ def join_tables(data_dir, nights, output, rtol=5, redo=True):
             h = fits.getheader(stampfile, ext=1)
             x0, y0 = 0.5 * h["NAXIS1"], 0.5 * h["NAXIS2"]
             cat = Table.read(catfile, hdu=2)
+            if len(cat) == 0:
+                continue
             sep = np.sqrt((cat["X_IMAGE"] - x0)**2 + (cat["Y_IMAGE"] - y0)**2)
             idx = np.argmin(sep)
             cat = cat[idx]
