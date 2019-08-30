@@ -4,8 +4,8 @@ name: mode0
 # Configuration of directories
 singles_dir: /mnt/jype/MainSurvey/reduced
 tiles_dir: /mnt/jype/MainSurvey/tiles/T01
-output_dir: /mnt/public/kadu/stdcal
-# output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
+#output_dir: /mnt/public/kadu/stdcal
+output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
 
 # Select interval of nights used in the calibration
 first_night: 2016-06-06
@@ -29,7 +29,7 @@ filters_version: dr1 # dr1 or dr2
 # List of problematic stars that should be skipped in the calibration
 # Names are case insensitive
 flagged_stars:
-#- "LTT 377" # High proper-motion star
+- "LTT 377" # High proper-motion star; model seems to be incorrect
 #- "LTT 3218" # White Dwarf
 #- "LTT 4364" #  White Dwarf
 #- "CD-32_9927"
