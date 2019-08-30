@@ -17,7 +17,8 @@ import yaml
 import numpy as np
 import astropy.units as u
 from astropy.io import ascii
-from astropy.table import Table, vstack, join, hstack
+from astropy.table import Table, vstack, join
+import matplotlib.pyplot as plt
 import speclite.filters
 import pymc3 as pm
 
@@ -89,7 +90,7 @@ def single_band_calib(data, outdb, redo=False):
         linear_regress = zp[data["night"]] - kappa[data["night"]] * data[
             "AIRMASS"]
         pm.Cauchy('y', alpha=linear_regress, beta=eps, observed=data["DELTAMAG"])
-        trace = pm.sample()
+        trace = pm.sample(nchains=4, njobs=4)
     pm.save_trace(trace, outdb, overwrite=True)
     summary = []
     for night, idx in nights_lookup.items():
@@ -101,6 +102,13 @@ def single_band_calib(data, outdb, redo=False):
         summary.append(t)
     summary = vstack(summary)
     summary.write("{}.txt".format(outdb), overwrite=True, format="ascii")
+    # Saving dictionary with indices to allow use of traces
+    root, band = os.path.split(outdb)
+    nights_lookup = {k.decode(): v for k, v in nights_lookup.items()}
+    with open(os.path.join(root, "index_night_{}.yaml".format(band)),
+              "w") as f:
+        yaml.dump(nights_lookup, f, default_flow_style=False)
+
     return
 
 def merge_zp_tables(redo=False):
@@ -110,8 +118,8 @@ def merge_zp_tables(redo=False):
     output = os.path.join(context.tables_dir, "date_zps.fits")
     flux_keys = ["FLUX_AUTO", "FLUX_ISO", "FLUXAPERCOR"]
     wdir = os.path.join(context.home_dir, "zps")
-    epochs = [_ for _ in os.listdir(wdir) if os.path.isdir(os.path.join(wdir,
-                                                                      _ ))]
+    epochs = [_ for _ in os.listdir(wdir) if
+              os.path.isdir(os.path.join(wdir,_))]
     etables = []
     for epoch in epochs:
         zptables = None
@@ -139,8 +147,9 @@ def merge_zp_tables(redo=False):
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
     if len(config_files) == 0:
-        print("Configuration file not found. Using default configurations.")
-        config_files.append("config_mode5.yaml")
+        config_files = ["config_mode0.yaml", "config_mode5.yaml"]
+        print("Configuration file not found. Using modes 0 and 5.")
+
     for filename in config_files:
         with open(filename) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
@@ -160,6 +169,10 @@ def main():
         goodidx = np.delete(goodidx, badidx)
         phot = phot[goodidx]
         ########################################################################
+        # Remove saturated stars
+        idx = np.where(phot["FLAGS"] <= 2)[0]
+        phot = phot[idx]
+        ########################################################################
         # Add columns to the photometry table containing the model magnitudes
         stars = set(phot["STAR"])
         model_mags = get_splus_magnitudes(stars, config["stdlib"],
@@ -174,26 +187,28 @@ def main():
                 idx = np.where((phot["STAR"]==star) & (phot["FILTER"]==band))[0]
                 modelmag[idx] = float(model_mags[star][fname])
         phot["MODELMAG"] = modelmag
-        phot["OBSMAG"] = -2.5 * np.log10(phot["FLUX_APER"] / phot["EXPTIME"])
-        phot["DELTAMAG"] = phot["MODELMAG"] - phot["OBSMAG"]
-        ########################################################################
-        # Removing problematic lines
-        phot = phot[np.isfinite(phot["DELTAMAG"])]
-        dbs_dir = os.path.join(config["output_dir"],
-                               "zps_{}".format(config["name"]))
-        if not os.path.exists(dbs_dir):
-            os.mkdir(dbs_dir)
-        for band in context.bands:
-            idx = np.where(band == phot["FILTER"])[0]
-            if len(idx) == 0:
-                continue
-            outdb = os.path.join(dbs_dir, band)
-            data = phot[idx]
-            single_band_calib(data, outdb)
+        for flux in ["FLUX_APER", "FLUX_AUTO"]:
+            p = Table(phot, copy=True)
+            p["OBSMAG"] = -2.5 * np.log10(p[flux] / p["EXPTIME"])
+            p["DELTAMAG"] = p["MODELMAG"] - p["OBSMAG"]
+            ####################################################################
+            # Removing problematic lines
+            p = p[np.isfinite(p["DELTAMAG"])]
 
-
+            dbs_dir = os.path.join(config["output_dir"],
+                                   "zps-{}-{}".format(config["name"], flux))
+            if not os.path.exists(dbs_dir):
+                os.mkdir(dbs_dir)
+            for band in context.bands:
+                print(filename, band)
+                idx = np.where(band == p["FILTER"])[0]
+                if len(idx) == 0:
+                    continue
+                outdb = os.path.join(dbs_dir, band)
+                data = p[idx]
+                data.write(os.path.join(dbs_dir, "phot_{}.fits".format(band)),
+                           overwrite=True)
+                single_band_calib(data, outdb, redo=True)
 
 if __name__ == "__main__":
     main()
-
-#     table = merge_zp_tables(redo=True)
