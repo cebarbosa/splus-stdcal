@@ -11,6 +11,7 @@ Produce a few plots for the report on the photometric calibration.
 from __future__ import print_function, division
 
 import os
+import yaml
 import pickle
 from datetime import datetime
 
@@ -18,13 +19,12 @@ import numpy as np
 from astropy.table import Table, hstack
 from astropy.io import ascii
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.dates import date2num
 from matplotlib import cm
 from tqdm import tqdm
 
 import context
-from stdcal import splus_mag_std_stars
-import misc
 
 def std_star_gantt_chart():
     """ Plot the observation dates of standard stars. """
@@ -160,58 +160,124 @@ def kappas_tololo():
     plt.clf()
     return
 
-def plot_zps_nights(fkey, redo=False):
+def plot_zps_nights(config, fkey, redo=False, alpha=15.865):
     """ Plot results for modeling for individual nights  """
-    wdir = os.path.join(context.home_dir, "zps")
-    stars = Table.read(os.path.join(wdir, "sample.fits"))
-    refmag = splus_mag_std_stars(set(stars["STAR"]))
+    wdir = os.path.join(config["output_dir"], "zps-{}-{}".format(
+                        config["name"], fkey))
     ########################################################################
     # Getting the model results
-    filename = os.path.join(wdir, "zps_{}.fits".format(fkey))
-    if not os.path.exists(filename):
-        return
-    models = Table.read(filename)
     cmap = cm.get_cmap("Spectral_r")
     colors = [cmap(i) for i in np.linspace(0,1, 12)]
-    plt.style.context("seaborn-talk")
     fig = plt.figure(1, figsize=(6.5, 4))
-    for night in tqdm(set(models["date"])):
-        data_night = stars[np.where(stars["DATE"]==night)]
-        nmodels = models[np.where(models["date"] == night)]
-        for i, band in enumerate(context.bands):
-            ndata = data_night[np.where(data_night["FILTER"] == band)]
-            if "{}_zp".format(band) not in models.colnames:
-                continue
-            zp = nmodels["{}_zp".format(band)].data[0]
-            zperr = nmodels["{}_zperr".format(band)].data[0]
-            kappa =  nmodels["{}_kappa".format(band)].data[0]
-            kappaerr = nmodels["{}_kappaerr".format(band)].data[0]
-            ax = plt.subplot(4, 3, i + 1)
-            symbols = ["o", "s", "^", "x", ""]
-            for j, star in enumerate(set(ndata["STAR"])):
-                sdata = ndata[ndata["STAR"] == star]
-                magobs = misc.mag(sdata[fkey] / sdata["EXPTIME"])
-                M = refmag[star]["splus-{}".format(band)]
-                ax.plot(sdata["AIRMASS"], M - magobs, c=colors[i],
-                        label=star, ls="None", marker=symbols[j])
-            X = np.linspace(1., 1.8, 100)
-            ax.plot(X, zp - kappa * X, "--", c="C0", label="model")
-            leg = ax.legend(prop = {'size': 6})
-            leg.set_title(band, prop={"size": 6})
-            ax.set_xlim(1, 1.8)
-            if i < 9:
-                ax.xaxis.set_ticklabels([])
-        fig.add_subplot(111, frameon=False)
-        plt.tick_params(labelcolor='none', top=False, bottom=False, left=False,
-                        right=False, which="both")
-        plt.ylabel("$M - m$", labelpad=12)
-        plt.xlabel("X")
-        plt.title("Date: {}".format(night))
-        plt.subplots_adjust(left=0.08, right=0.98, hspace=0.05, top=0.95,
-                            bottom=0.09, wspace=0.3)
-        plt.savefig(os.path.join(wdir, "plots/zps_{}_{}.png".format(
-                     fkey, night)), dpi=300)
-        plt.clf()
+    # Read all tables and see what nights should be processed
+    # Also, read all traces to be used in plots
+    tables, traces = {}, {}
+    for band in context.bands:
+        filename = os.path.join(wdir, "phot_{}.fits".format(band))
+        if not os.path.exists(filename):
+            continue
+        tables[band] = Table.read(filename, format="fits")
+        db = os.path.join(wdir, band)
+        traces[band] = load_traces(db)
+    nights = [list(set(tables[band]["DATE"])) for band in \
+            context.bands if band in tables.keys()]
+    nights = np.unique(np.hstack(nights))
+    if config["name"] == "mode0":
+        X = np.linspace(1., 1.4, 100)
+    else:
+        X = np.linspace(1., 1.8, 100)
+    output = os.path.join(wdir, "results-{}-{}.pdf".format(config["name"],
+                                                           fkey))
+    with PdfPages(output) as pdf:
+        for night in tqdm(nights):
+            fig, ax = plt.subplots(nrows=4, ncols=3, sharex=True, sharey=True,
+                                   figsize=(8, 5))
+            fig.text(0.5, 0.03, 'X', ha='center')
+            fig.text(0.01, 0.5, '$M - m$', va='center', rotation='vertical')
+            fig.text(0.5, 0.97, night, ha='center')
+            plt.title("Date: {}".format(night))
+            for i, band in enumerate(context.bands):
+                if band not in tables.keys():
+                    continue
+                ax = plt.subplot(4, 3, i + 1)
+                # Plot table data
+                data = tables[band]
+                ax.plot(data["AIRMASS"], data["MODELMAG"] - data["OBSMAG"], ".",
+                        c="0.9", label="All")
+                idx = np.where(data["DATE"]==night)[0]
+                stars = set(data["STAR"][idx])
+                symbols = ["o", "s", "^", "x", ""]
+                for j,star in enumerate(stars):
+                    idx = np.where((data["DATE"] == night) &
+                                   (data["STAR"]==star))[0]
+                    ax.plot(data["AIRMASS"][idx],
+                            data["MODELMAG"][idx] - data["OBSMAG"][idx],
+                            marker=symbols[j], c=colors[i],
+                            label=star.upper().replace("_", "\_"),
+                            ls="none")
+                # Plot results based on traces
+                idxfile = os.path.join(wdir, "index_night_{}.yaml".format(band))
+                if not os.path.exists(idxfile):
+                    continue
+                with open(idxfile, "r") as f:
+                    ndct = yaml.load(f, Loader=yaml.FullLoader)
+                if night not in ndct.keys():
+                    continue
+                idx = ndct[night]
+                zps = traces[band]["zp"][:,idx]
+                ks = traces[band]["kappa"][:,idx]
+                y = zps[:, None] - np.outer(ks, X)
+                ylower = np.percentile(y, alpha, axis=0)
+                yupper = np.percentile(y, 100 - alpha, axis=0)
+                ax.plot(X, zps.mean() - X * ks.mean(), "-", c=colors[i],
+                        label="Model")
+                ax.fill_between(X, ylower, yupper, color=colors[i], alpha=0.5)
+                leg = ax.legend(prop = {'size': 5})
+                leg.set_title(band, prop={"size": 5})
+                if i < 9:
+                    ax.xaxis.set_ticklabels([])
+            plt.subplots_adjust(left=0.07, right=0.98, hspace=0.05, top=0.95,
+                                bottom=0.08, wspace=0.2)
+            pdf.savefig()
+            plt.close()
+
+def load_traces(db, npop=None, alpha=15.865):
+    params = ["zp", "kappa"]
+    if not os.path.exists(db):
+        return None
+    ntraces = len(os.listdir(db))
+    data = [np.load(os.path.join(db, _, "samples.npz")) for _ in
+            os.listdir(db)]
+    traces = {}
+    for param in params:
+        traces[param] = np.vstack([data[num][param] for num in range(ntraces)])
+    return traces
+    # maps, errors = [], []
+    # for comp in range(len(npop)):
+    #     nssps = npop[comp]
+    #     for param in params:
+    #         if param in ["Av"]:
+    #             trace = np.vstack([data[num]["Av_{}".format(comp)]
+    #                                       for num in range(ntraces)])
+    #         else:
+    #             ws, vs = [], []
+    #             for nssp in range(nssps):
+    #                 v = np.vstack([data[num]["{}_{}_{}".format(param, comp, nssp)]
+    #                                for num in range(ntraces)])
+    #                 w = np.vstack([data[num]["flux_{}_{}".format(comp, nssp)]
+    #                                for num in range(ntraces)])
+    #                 vs.append(v)
+    #                 ws.append(w)
+    #             vs = np.array(vs)
+    #             ws = np.array(ws)
+    #             trace = np.average(vs, weights=ws, axis=0)
+    #         med = np.median(trace, axis=0)
+    #         lower = med - np.percentile(trace, alpha, axis=0)
+    #         upper =  np.percentile(trace, 100 - alpha, axis=0) - med
+    #         maps.append(med)
+    #         errors.append(np.column_stack((lower, upper)))
+    # maps = Table(maps, names=params)
+    # return maps, errors
 
 def plot_zps_global(flux_key):
     """ Produces plot with the pooled results. """
@@ -302,10 +368,16 @@ def compare_zps(flux_key="FLUX_AUTO", update=False):
     plt.savefig(os.path.join(context.plots_dir, "comparison_laura.png"))
 
 if __name__ == "__main__":
+    config_files = ["config_mode5.yaml", "config_mode0.yaml"]
+    for filename in config_files:
+        with open(filename) as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        for flux in ["FLUX_APER", "FLUX_AUTO"]:
+            plot_zps_nights(config, flux)
+
     # std_star_gantt_chart()
     # compare_kappas()
-    compare_zps()
+    # compare_zps()
     # kappas_tololo()
     # Plot results from the zero point modeling
-    # plot_zps_nights("FLUX_AUTO")
     # plot_zps_global("FLUX_AUTO")
