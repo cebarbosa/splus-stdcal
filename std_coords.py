@@ -19,7 +19,7 @@ if __name__ == "__main__":
     stars = ["cd-32_9927", "eg274", "feige110", "hr4468", "hr7950", "ltt1020",
              "ltt1788", "ltt2415", "ltt3218", "ltt377", "ltt3864", "ltt4364",
              "ltt4816", "ltt6248", "ltt7379", "ltt745", "ltt7987", "ltt9239",
-             "ltt9491"]
+             "ltt9491", "cd-34_241"]
     # Stars with large proper motions that require match using parallax
     hpms = ["ltt3218", "ltt4364"]
     width = u.Quantity(0.1, u.deg)
@@ -61,12 +61,3 @@ if __name__ == "__main__":
         table.append(startable)
     table = vstack(table)
     table.write(output, format="fits", overwrite=True)
-
-    # distance = Distance(parallax=gaia2["Plx"] * u.mas)
-    # cgaia2 = SkyCoord(ra=gaia2["RA_ICRS"]*u.degree,
-    #                   dec=gaia2["DE_ICRS"]*u.degree,
-    #                   distance=distance,
-    #                   pm_ra_cosdec=gaia2['pmRA'] * u.mas/u.yr,
-    #                   pm_dec=gaia2['pmDE'] * u.mas/u.yr,
-    #                   obstime=Time(2015.5, format='decimalyear'))
-    # print(cgaia2)
