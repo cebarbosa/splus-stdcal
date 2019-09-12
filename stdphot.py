@@ -107,7 +107,8 @@ def make_std_cutout(nights, data_dir, outdir_root, redo=False,
 
 def run_sextractor(data_dir, nights, redo=False):
     """ Runs SExtractor on stamps of standard stars. """
-    config_dir = os.path.split(os.path.realpath(__file__))[0]
+    config_dir = os.path.join(os.path.split(os.path.realpath(__file__))[0],
+                              "config")
     sex_config_file = os.path.join(config_dir, "stdcal.sex")
     sex_params_file = os.path.join(config_dir, "stdcal.param")
     filter_file = os.path.join(config_dir, "gauss_3.0_5x5.conv")
