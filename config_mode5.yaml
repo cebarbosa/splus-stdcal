@@ -8,7 +8,7 @@ tiles_dir: /mnt/jype/MainSurvey/tiles/T01
 output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
 
 # Select interval of nights used in the calibration
-first_night: 2017-12-15
+first_night: 2017-12-14
 last_night: 2025-01-01
 
 # Parameters for the cutout

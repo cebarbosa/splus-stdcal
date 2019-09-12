@@ -9,7 +9,7 @@ output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
 
 # Select interval of nights used in the calibration
 first_night: 2016-06-06
-last_night: 2017-12-14
+last_night: 2017-12-10
 
 # Parameters for the cutout
 cutout_size: 200 # pixel
