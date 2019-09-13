@@ -111,39 +111,6 @@ def single_band_calib(data, outdb, redo=False):
 
     return
 
-def merge_zp_tables(redo=False):
-    """ Make single table containing zero points for all types of photometric
-    methods. """
-    print("Producing table with all zero points...")
-    output = os.path.join(context.tables_dir, "date_zps.fits")
-    flux_keys = ["FLUX_AUTO", "FLUX_ISO", "FLUXAPERCOR"]
-    wdir = os.path.join(context.home_dir, "zps")
-    epochs = [_ for _ in os.listdir(wdir) if
-              os.path.isdir(os.path.join(wdir,_))]
-    etables = []
-    for epoch in epochs:
-        zptables = None
-        for fkey in flux_keys:
-            for band in context.bands:
-                tablename = os.path.join(wdir, epoch, "zp_{}_{}.fits".format(
-                    fkey, band))
-                if not os.path.exists(tablename):
-                    continue
-                zptable = Table.read(tablename)
-                for s in ["zp", "zperr", "kappa", "kappaerr"]:
-                    incol = "{}_{}".format(band, s)
-                    zptable.rename_column(incol, "{}_{}_{}".format(s, fkey,
-                                                                   band))
-                if zptables is None:
-                    zptables = zptable
-                else:
-                    zptables = join(zptables, zptable, join_type="outer")
-        etables.append(zptables)
-    etables = vstack(etables)
-    etables.write(output, overwrite=True)
-    print("Do not forget to upload the current version of the zeropoints!")
-    return etables
-
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
     if len(config_files) == 0:
@@ -194,7 +161,6 @@ def main():
             ####################################################################
             # Removing problematic lines
             p = p[np.isfinite(p["DELTAMAG"])]
-
             dbs_dir = os.path.join(config["output_dir"],
                                    "zps-{}-{}".format(config["name"], flux))
             if not os.path.exists(dbs_dir):
