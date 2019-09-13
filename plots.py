@@ -232,7 +232,7 @@ def plot_zps_nights(config, fkey, redo=False, alpha=15.865):
                 ax.plot(X, zps.mean() - X * ks.mean(), "-", c=colors[i],
                         label="Model")
                 ax.fill_between(X, ylower, yupper, color=colors[i], alpha=0.5)
-                leg = ax.legend(prop = {'size': 5})
+                leg = ax.legend(prop = {'size': 5}, loc=4)
                 leg.set_title(band, prop={"size": 5})
                 if i < 9:
                     ax.xaxis.set_ticklabels([])
@@ -241,7 +241,7 @@ def plot_zps_nights(config, fkey, redo=False, alpha=15.865):
             pdf.savefig()
             plt.close()
 
-def load_traces(db, npop=None, alpha=15.865):
+def load_traces(db):
     params = ["zp", "kappa"]
     if not os.path.exists(db):
         return None
@@ -252,32 +252,6 @@ def load_traces(db, npop=None, alpha=15.865):
     for param in params:
         traces[param] = np.vstack([data[num][param] for num in range(ntraces)])
     return traces
-    # maps, errors = [], []
-    # for comp in range(len(npop)):
-    #     nssps = npop[comp]
-    #     for param in params:
-    #         if param in ["Av"]:
-    #             trace = np.vstack([data[num]["Av_{}".format(comp)]
-    #                                       for num in range(ntraces)])
-    #         else:
-    #             ws, vs = [], []
-    #             for nssp in range(nssps):
-    #                 v = np.vstack([data[num]["{}_{}_{}".format(param, comp, nssp)]
-    #                                for num in range(ntraces)])
-    #                 w = np.vstack([data[num]["flux_{}_{}".format(comp, nssp)]
-    #                                for num in range(ntraces)])
-    #                 vs.append(v)
-    #                 ws.append(w)
-    #             vs = np.array(vs)
-    #             ws = np.array(ws)
-    #             trace = np.average(vs, weights=ws, axis=0)
-    #         med = np.median(trace, axis=0)
-    #         lower = med - np.percentile(trace, alpha, axis=0)
-    #         upper =  np.percentile(trace, 100 - alpha, axis=0) - med
-    #         maps.append(med)
-    #         errors.append(np.column_stack((lower, upper)))
-    # maps = Table(maps, names=params)
-    # return maps, errors
 
 def plot_zps_global(flux_key):
     """ Produces plot with the pooled results. """
