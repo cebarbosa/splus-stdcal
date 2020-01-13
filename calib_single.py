@@ -12,14 +12,19 @@ single exposure catalogs.
 from __future__ import print_function, division
 
 import os
+import sys
+import yaml
 import platform
+from functools import partial
 
 import numpy as np
-from astropy.table import Table, join, vstack, hstack, unique
+from astropy.table import Table
 from astropy.io import fits
+from multiprocessing import Pool
 from tqdm import tqdm
 
 import context
+import misc
 
 def calib_single_catalogs(zptable, flux_keys, survey, redo=False):
     """ Performs the calibration of catalogs from single exposure. """
@@ -113,9 +118,29 @@ def calib_single_catalogs(zptable, flux_keys, survey, redo=False):
                 os.mkdir(output_dir)
             data.write(output, overwrite=True)
 
+def main():
+    config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
+    if len(config_files) == 0:
+        default_file = "config_mode5.yaml"
+        print("Using default config file ({})".format(default_file))
+        config_files.append(default_file)
+    for filename in config_files:
+        with open(filename) as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        # Set nights that will be calibrated
+        nights = misc.select_nights(config)
+        # Run sextractor to produce catalogs
+        singles_dir = os.path.join(config["output_dir"], "single")
+        if not os.path.exists(singles_dir):
+            os.mkdir(singles_dir)
+        pool = Pool(25)
+        pool.map(f, nights)
+
 if __name__ == "__main__":
-    flux_keys = ["FLUX_AUTO", "FLUX_ISO", "FLUXAPERCOR"]
-    survey = "STRIPE82"
-    redo=True
-    table = Table.read(os.path.join(context.tables_dir, "date_zps.fits"))
-    calib_single_catalogs(table, flux_keys, survey, redo=True)
+    main()
+
+    # flux_keys = ["FLUX_AUTO", "FLUX_ISO", "FLUXAPERCOR"]
+    # survey = "STRIPE82"
+    # redo=True
+    # table = Table.read(os.path.join(context.tables_dir, "date_zps.fits"))
+    # calib_single_catalogs(table, flux_keys, survey, redo=True)
