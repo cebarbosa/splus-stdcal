@@ -11,12 +11,10 @@ Miscelaneous tasks used in and for the photometric calibration.
 from __future__ import print_function, division
 
 import os
+from datetime import datetime
 
 import numpy as np
-import astropy.units as u
 from astropy.table import Table, vstack, hstack
-
-import context
 
 def mag(f):
     return -2.5 * np.log10(f)
@@ -33,32 +31,21 @@ def table_DR_zps(directory):
     zps = hstack([filenames, vstack(zps)])
     return zps
 
-def get_apertures(logfile):
-    """ Parses the logfile to obtain the apertures used in the photometry."""
-    splitter = "(pixels, diameter)"
-    with open(logfile) as f:
-        data = [_ for _ in f.readlines() if splitter in _][0]
-    data = data.split(splitter)[1].replace("(", "").replace(")", "")
-    data = np.array([float(_) for _ in data.split(",")])
-    radius = np.round(0.5 * data * context.ps * u.pixel, 3)
-    table = Table([np.arange(len(radius)), radius], names=["aperture",
-                                                           "radius"])
-    return table
-
-# def get_apertures(logfile, napers):
-#     """ Parses the logfile to obtain the apertures used in the photometry."""
-#     splitter = "(pixels, diameter)"
-#     with open(logfile) as f:
-#         data = [_ for _ in f.readlines() if splitter in _]
-#     data = [d.split(splitter)[1].replace("(", "").replace(")", "") for d in
-#             data]
-#     data = [np.array([float(_) for _ in d.split(",")]) for d in data]
-#     sizes = [len(_) for _ in data]
-#     idx = sizes.index(napers)
-#     radius = np.round(0.5 * data[idx] * context.ps * u.pixel, 3)
-#     table = Table([np.arange(len(radius)), radius], names=["aperture",
-#                                                            "radius"])
-#     return table
+def select_nights(config):
+    """ Select all nights in the configuration file range. """
+    first_night = datetime.strptime(str(config["first_night"]), '%Y-%m-%d')
+    last_night = datetime.strptime(str(config["last_night"]), '%Y-%m-%d')
+    all_nights = sorted([_ for _ in sorted(os.listdir(config["singles_dir"])) \
+                if os.path.isdir(os.path.join(config["singles_dir"], _))])
+    nights = []
+    for direc in all_nights:
+        try:
+            night = datetime.strptime(direc, "%Y-%m-%d")
+        except:
+            continue
+        if first_night <= night <= last_night:
+            nights.append(direc)
+    return nights
 
 
 if __name__ == "__main__":

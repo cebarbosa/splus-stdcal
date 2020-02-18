@@ -67,10 +67,15 @@ def find_bad_calibrations(tables, traces, output, nsig=5):
         with open(idxfile, "r") as f:
             ndct = yaml.load(f, Loader=yaml.FullLoader)
         nstars, zpx2err = [], []
+        zeropoints, zeropoints_err, kappas, kappas_err = [], [], [], []
         for night in nights:
             if night not in ndct.keys():
                 zpx2err.append(np.infty)
                 nstars.append(0)
+                zeropoints.append(np.nan)
+                zeropoints_err.append(np.nan)
+                kappas.append(np.nan)
+                kappas_err.append(np.nan)
                 continue
             idx = ndct[night]
             zps = traces[band]["zp"][:, idx]
@@ -84,12 +89,18 @@ def find_bad_calibrations(tables, traces, output, nsig=5):
             mu = np.mean(models, axis=0)
             dm = np.abs(table["DELTAMAG"] - mu)
             nstars.append(len(np.where(dm <= 5 * sigma)[0]))
+            zeropoints.append(np.mean(zps))
+            zeropoints_err.append(np.std(zps))
+            kappas.append(np.mean(ks))
+            kappas_err.append(np.std(ks))
         zpx2err = np.array(zpx2err)
         nstars = np.array(nstars)
         mu, median, sd = sigma_clipped_stats(zpx2err[np.isfinite(zpx2err)])
         maxerr = mu + nsig * sd
-        flag = np.where(zpx2err < maxerr, 1, 0) * nstars
-        t = Table([flag], names= ["NSTARS_{}".format(band)])
+        nstars = np.where(zpx2err < maxerr, 1, 0) * nstars
+        names = ["ZP", "eZP", "K", "eK", "N"]
+        t = Table([zeropoints, zeropoints_err, kappas, kappas_err, nstars],
+                  names= ["{}_{}".format(n, band) for n in names])
         results.append(t)
         ax.hist(zpx2err, bins=np.linspace(0, 0.4, 20), color=colors[i],
                 density=True, label=band)
@@ -98,13 +109,44 @@ def find_bad_calibrations(tables, traces, output, nsig=5):
             maxerr))
         leg = ax.legend(prop={'size': 8}, loc=1)
     results = hstack(results)
-    print(results)
     plt.subplots_adjust(left=0.07, right=0.98, hspace=0.05, top=0.95,
                         bottom=0.08, wspace=0.2)
     plt.savefig(output)
-    plt.show()
     plt.clf()
-    return
+    return results
+
+def merge_zp_tables(redo=False):
+    """ Make single table containing zero points for all types of photometric
+    methods. """
+    print("Producing table with all zero points...")
+    output = os.path.join(context.tables_dir, "date_zps.fits")
+    flux_keys = ["FLUX_AUTO", "FLUX_ISO", "FLUXAPERCOR"]
+    wdir = os.path.join(context.home_dir, "zps")
+    epochs = [_ for _ in os.listdir(wdir) if
+              os.path.isdir(os.path.join(wdir,_))]
+    etables = []
+    for epoch in epochs:
+        zptables = None
+        for fkey in flux_keys:
+            for band in context.bands:
+                tablename = os.path.join(wdir, epoch, "zp_{}_{}.fits".format(
+                    fkey, band))
+                if not os.path.exists(tablename):
+                    continue
+                zptable = Table.read(tablename)
+                for s in ["zp", "zperr", "kappa", "kappaerr"]:
+                    incol = "{}_{}".format(band, s)
+                    zptable.rename_column(incol, "{}_{}_{}".format(s, fkey,
+                                                                   band))
+                if zptables is None:
+                    zptables = zptable
+                else:
+                    zptables = join(zptables, zptable, join_type="outer")
+        etables.append(zptables)
+    etables = vstack(etables)
+    etables.write(output, overwrite=True)
+    print("Do not forget to upload the current version of the zeropoints!")
+    return etables
 
 if __name__ == "__main__":
     config_files = ["config_mode0.yaml", "config_mode5.yaml"]
@@ -115,6 +157,7 @@ if __name__ == "__main__":
         for phot in phots:
             wdir = os.path.join(config["output_dir"], "zps-{}-{}".format(
                 config["name"], phot))
+            outtable = os.path.join(wdir, "zps-dates-{}.fits".format(phot))
             tables, traces = {}, {}
             for band in context.bands:
                 filename = os.path.join(wdir, "phot_{}.fits".format(band))
@@ -125,4 +168,5 @@ if __name__ == "__main__":
                 traces[band] = load_traces(db)
             outimg = os.path.join(wdir, "maxerr-{}-{}.pdf".format(
                                   config["name"], phot))
-            fit_flags = find_bad_calibrations(tables, traces, outimg)
+            table = find_bad_calibrations(tables, traces, outimg)
+            table.write(outtable, overwrite=True)

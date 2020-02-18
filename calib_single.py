@@ -15,7 +15,6 @@ import os
 import sys
 import yaml
 import platform
-from functools import partial
 
 import numpy as np
 from astropy.table import Table

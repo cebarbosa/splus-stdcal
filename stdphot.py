@@ -12,7 +12,6 @@ import os
 import sys
 import yaml
 from subprocess import call
-from datetime import datetime
 
 import numpy as np
 import astropy.units as u
@@ -26,21 +25,7 @@ from tqdm import tqdm
 
 import sip_tpv
 
-def select_nights(config):
-    """ Select all nights in the configuration file range. """
-    first_night = datetime.strptime(str(config["first_night"]), '%Y-%m-%d')
-    last_night = datetime.strptime(str(config["last_night"]), '%Y-%m-%d')
-    all_nights = sorted([_ for _ in sorted(os.listdir(config["singles_dir"])) \
-                if os.path.isdir(os.path.join(config["singles_dir"], _))])
-    nights = []
-    for direc in all_nights:
-        try:
-            night = datetime.strptime(direc, "%Y-%m-%d")
-        except:
-            continue
-        if first_night <= night <= last_night:
-            nights.append(direc)
-    return nights
+import misc
 
 def make_std_cutout(nights, data_dir, outdir_root, redo=False,
                       skip_existing_nights=True, cutout_size=None):
@@ -174,7 +159,7 @@ def main():
         if not os.path.exists(config["output_dir"]):
             os.mkdir(config["output_dir"])
         # Set nights that will be calibrated
-        nights = select_nights(config)
+        nights = misc.select_nights(config)
         # Removing nights without standard stars
         nights = [night for night in nights if
                   any(s.startswith("EXTMONI") and s.endswith("_proc.fits")
