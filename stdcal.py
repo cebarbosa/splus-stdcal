@@ -17,8 +17,7 @@ import yaml
 import numpy as np
 import astropy.units as u
 from astropy.io import ascii
-from astropy.table import Table, vstack, join
-import matplotlib.pyplot as plt
+from astropy.table import Table, vstack
 import speclite.filters
 import pymc3 as pm
 
@@ -119,7 +118,7 @@ def main():
 
     for filename in config_files:
         with open(filename) as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
+            config = yaml.load(f)
         phot_file = os.path.join(config["output_dir"],
                                 "phottable_{}.fits".format(config["name"]))
         phot = Table.read(phot_file)
