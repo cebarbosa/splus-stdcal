@@ -29,7 +29,7 @@ filters_version: dr1 # dr1 or dr2
 # List of problematic stars that should be skipped in the calibration
 # Names are case insensitive
 flagged_stars:
-- "LTT 377" # High proper-motion star; model seems to be incorrect
+# - "LTT 377" # High proper-motion star; model seems to be incorrect
 #- "LTT 3218" # White Dwarf
 #- "LTT 4364" #  White Dwarf
 #- "CD-32_9927"

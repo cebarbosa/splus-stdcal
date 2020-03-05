@@ -150,7 +150,7 @@ def join_tables(data_dir, nights, output, rtol=5, redo=True):
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
     if len(config_files) == 0:
-        default_file = "config_mode5.yaml"
+        default_file = "config_mode0.yaml"
         print("Using default config file ({})".format(default_file))
         config_files.append(default_file)
     for filename in config_files:

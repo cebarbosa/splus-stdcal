@@ -128,12 +128,9 @@ def main():
             config = yaml.load(f, Loader=yaml.FullLoader)
         # Set nights that will be calibrated
         nights = misc.select_nights(config)
-        # Run sextractor to produce catalogs
         singles_dir = os.path.join(config["output_dir"], "single")
-        if not os.path.exists(singles_dir):
-            os.mkdir(singles_dir)
-        pool = Pool(25)
-        pool.map(f, nights)
+        # pool = Pool(25)
+        # pool.map(f, nights)
 
 if __name__ == "__main__":
     main()
