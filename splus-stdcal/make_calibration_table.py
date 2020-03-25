@@ -36,7 +36,7 @@ def load_traces(db):
         traces[param] = np.vstack([data[num][param] for num in range(ntraces)])
     return traces
 
-def make_calibration_table(config, wdir, nsig=3, X=2.0):
+def make_calibration_table(config, wdir, nsig=5, X=2.0):
     """ Determine the maximum error allowed in the calibration and flag
     nights and bands that may have issues. """
     phot = os.path.split(wdir)[-1]
@@ -56,6 +56,7 @@ def make_calibration_table(config, wdir, nsig=3, X=2.0):
     nights = [list(set(tables[band]["DATE"])) for band in \
               context.bands if band in tables.keys()]
     nights = np.unique(np.hstack(nights))
+    ############################################################################
     fig = plt.figure(figsize=(8, 5))
     title = "{} {}".format(config["name"].upper(),
                               phot.replace("_", "\_"))
@@ -81,7 +82,7 @@ def make_calibration_table(config, wdir, nsig=3, X=2.0):
         nin, zpx2err, ntot = [], [], []
         zeropoints, zeropoints_err, kappas, kappas_err = [], [], [], []
         for night in nights:
-            if night not in ndct.keys():
+            if night not in ndct:
                 zpx2err.append(np.infty)
                 nin.append(0)
                 ntot.append(0)
@@ -95,19 +96,20 @@ def make_calibration_table(config, wdir, nsig=3, X=2.0):
             ks = trace["kappa"][:, idx]
             zpx2err.append(np.std(zps - ks * X))
             idx = np.where(table["DATE"] == night)[0]
-            table = table[idx]
-            models = zps[:, None] - np.outer(ks, table["AIRMASS"])
-            sigma = np.std(models, axis=0)
-            mu = np.mean(models, axis=0)
-            dm = np.abs(table["DELTAMAG"] - mu)
-            n = len(np.where(dm <= nsig * sigma)[0])
-            nin.append(n)
-            ntot.append(len(dm))
             zeropoints.append(np.mean(zps))
             zeropoints_err.append(np.std(zps))
             kappas.append(np.mean(ks))
             kappas_err.append(np.std(ks))
+            ntot.append(len(idx))
+            # Calculates the number of inliers
+            date = table[idx]
+            models = zps[:, None] - np.outer(ks, date["AIRMASS"].data)
+            sigma = np.std(models, axis=0)
+            mu = np.mean(models, axis=0)
+            dm = np.abs(date["DELTAMAG"].data - mu)
+            nin.append(len(np.where(dm <= nsig * sigma)[0]))
         zpx2err = np.array(zpx2err)
+        ntot = np.array(ntot)
         nin = np.array(nin)
         mu, median, sd = sigma_clipped_stats(zpx2err[np.isfinite(zpx2err)])
         maxerr = mu + nsig * sd
