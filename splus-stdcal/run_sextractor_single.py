@@ -59,7 +59,7 @@ def main():
         config_files.append(default_file)
     for filename in config_files:
         with open(filename) as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
+            config = yaml.load(f)
         # Set nights that will be calibrated
         nights = misc.select_nights(config)
         # Run sextractor to produce catalogs
@@ -67,7 +67,7 @@ def main():
         if not os.path.exists(singles_dir):
             os.mkdir(singles_dir)
         f = partial(run_sextractor_single, config["singles_dir"], singles_dir)
-        pool = Pool(25)
+        pool = Pool(8)
         pool.map(f, nights)
 
 if __name__ == "__main__":
