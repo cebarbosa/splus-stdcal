@@ -4,8 +4,8 @@ name: mode0
 # Configuration of directories
 singles_dir: /mnt/jype/MainSurvey/reduced
 tiles_dir: /mnt/jype/MainSurvey/tiles/T01
-#output_dir: /mnt/public/kadu/stdcal
-output_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
+#main_dir: /mnt/public/kadu/stdcal
+main_dir: /home/kadu/Dropbox/SPLUS/stdcal/stdcal
 
 # Select interval of nights used in the calibration
 first_night: 2016-06-06
@@ -16,6 +16,11 @@ cutout_size: 200 # pixel
 
 # Sextractor-related configurations
 sex_redo: False # Option to overwrite sextractor catalog
+
+# Photometry type with SExtractor
+sex_phot:
+- FLUX_AUTO
+- FLUX_APER
 
 # Tolerance of matching in the coordinates
 rtol: 5 # pixel
