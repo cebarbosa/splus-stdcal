@@ -14,7 +14,6 @@ from __future__ import print_function, division
 import os
 import sys
 import yaml
-import platform
 
 import numpy as np
 from astropy.table import Table, vstack
@@ -23,7 +22,7 @@ from tqdm import tqdm
 
 import context
 
-def load_date_zps(fname, nstars=3, noutliers=0):
+def load_date_zps(fname):
     """ Makes nested dictionary for calibration parameters.
 
     Input parameters
@@ -31,44 +30,37 @@ def load_date_zps(fname, nstars=3, noutliers=0):
     fname: str
         Input filename FITS table.
 
-    nstars: int (optional)
-        Minimum number of stars used in the calibration of the night.
-
-    noutliers: int (optional)
-        Maximum number of outliers in the fit.
-
     Output parameters
     -----------------
     dict
         Nested dictionary containing all zero points in the table. Results are
         accessed using dict[date][parname][filter], where parname includes
-        zp, zperr, kappa and kappaerr.
+        zp, zperr, kappa and kappaerr, ntot (number of stars), nout (number
+        of outliers).
 
     """
     table = Table.read(fname)
     results = {}
     for line in table:
-        z, zerr, k, kerr = {}, {}, {}, {}
+        z, zerr, k, kerr, ntot, nout = {}, {}, {}, {}, {}, {}
         d = {}
         for band in context.bands:
             zpkey = "ZP_{}".format(band)
             if zpkey not in table.colnames:
                 continue
-            # Select only nights without outliers
-            ntot = line["Ntot_{}".format(band)]
-            n = line["N_{}".format(band)]
-            nout = ntot - n
-            condition = (ntot >= nstars) & (nout <= noutliers)
-            if not condition:
-                continue
             z[band] = line[zpkey]
             zerr[band] = line["eZP_{}".format(band)]
             k[band] = line["K_{}".format(band)]
             kerr[band] = line["eK_{}".format(band)]
+            ntot[band] = line["Ntot_{}".format(band)]
+            nout[band] = line["Ntot_{}".format(band)] - \
+                         line["N_{}".format(band)]
         d["zp"] = z
         d["zperr"] = zerr
         d["kappa"] = k
         d["kappaerr"] = kerr
+        d["ntot"] = ntot
+        d["nout"] = nout
         results[line["DATE"]] = d
     return results
 
@@ -82,7 +74,7 @@ def load_header_fits_rec(catfile, hdu=1):
         Path for the LDAC_FITS file
 
     hdu: int (optional)
-        Number of the hdu to be read.
+        Number of the HDU to be read.
 
 
     Output parameters
@@ -105,7 +97,7 @@ def load_header_fits_rec(catfile, hdu=1):
     return hdict
 
 
-def calib_no_outliers():
+def calib_no_outliers(nstars=3, noutliers=0):
     """ Calibration script for the cases without outliers. """
     config_files = ["config_mode0.yaml", "config_mode5.yaml"]
     for j, config_file in enumerate(config_files):
@@ -135,6 +127,8 @@ def calib_no_outliers():
                 zperr = params["zperr"]
                 kappa = params["kappa"]
                 kappaerr = params["kappaerr"]
+                ntot = params["ntot"]
+                nout = params["nout"]
                 data_dir = os.path.join(single_dir, date)
                 if not os.path.exists(data_dir):
                     continue
@@ -146,12 +140,19 @@ def calib_no_outliers():
                     band = hdict["FILTER"][0]
                     if band not in zp:
                         continue
+                    # Select only nights without outliers
+                    condition = (ntot[band] >= nstars) & \
+                                (nout[band] <= noutliers)
+                    if not condition:
+                        continue
                     X = float(hdict["AIRMASS"][0])
                     exptime = float(hdict["EXPTIME"][0])
                     m0 = zp[band] - kappa[band] * X + 2.5 * np.log10(exptime)
                     m0err = np.sqrt(zperr[band]**2 + (kappaerr[band] * X)**2)
+                    t["FILENAME"] = [single]
+                    t["NIGHT"] = [date]
                     t["OBJECT"] = [hdict["OBJECT"][0]]
-                    t["DATE"] = [hdict["DATE-OBS"][0]]
+                    t["DATETIME"] = [hdict["DATE-OBS"][0]]
                     t["FILTER"] = [band]
                     t["EXPTIME"] = [exptime]
                     t["GAIN"] = [float(hdict["GAIN"][0])]
