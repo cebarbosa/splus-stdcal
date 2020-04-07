@@ -16,15 +16,16 @@ import pickle
 from datetime import datetime
 
 import numpy as np
-from astropy.table import Table, hstack
+from astropy.coordinates import SkyCoord
+from astropy.table import Table, hstack, vstack
 from astropy.io import ascii
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.dates import date2num
 from matplotlib import cm
 from tqdm import tqdm
 
 import context
+import misc
 
 def std_star_gantt_chart():
     """ Plot the observation dates of standard stars. """
@@ -160,87 +161,6 @@ def kappas_tololo():
     plt.clf()
     return
 
-def plot_zps_nights(config, fkey, redo=False, alpha=15.865):
-    """ Plot results for modeling for individual nights  """
-    wdir = os.path.join(config["output_dir"], "zps-{}-{}".format(
-                        config["name"], fkey))
-    ########################################################################
-    # Getting the model results
-    cmap = cm.get_cmap("Spectral_r")
-    colors = [cmap(i) for i in np.linspace(0,1, 12)]
-    fig = plt.figure(1, figsize=(6.5, 4))
-    # Read all tables and see what nights should be processed
-    # Also, read all traces to be used in plots
-    tables, traces = {}, {}
-    for band in context.bands:
-        filename = os.path.join(wdir, "phot_{}.fits".format(band))
-        if not os.path.exists(filename):
-            continue
-        tables[band] = Table.read(filename, format="fits")
-        db = os.path.join(wdir, band)
-        traces[band] = load_traces(db)
-    nights = [list(set(tables[band]["DATE"])) for band in \
-            context.bands if band in tables.keys()]
-    nights = np.unique(np.hstack(nights))
-    if config["name"] == "mode0":
-        X = np.linspace(1., 1.4, 100)
-    else:
-        X = np.linspace(1., 1.8, 100)
-    output = os.path.join(wdir, "results-{}-{}.pdf".format(config["name"],
-                                                           fkey))
-    with PdfPages(output) as pdf:
-        for night in tqdm(nights):
-            fig, ax = plt.subplots(nrows=4, ncols=3, sharex=True, sharey=True,
-                                   figsize=(8, 5))
-            fig.text(0.5, 0.03, 'X', ha='center')
-            fig.text(0.01, 0.5, '$M - m$', va='center', rotation='vertical')
-            fig.text(0.5, 0.97, night, ha='center')
-            plt.title("Date: {}".format(night))
-            for i, band in enumerate(context.bands):
-                if band not in tables.keys():
-                    continue
-                ax = plt.subplot(4, 3, i + 1)
-                # Plot table data
-                data = tables[band]
-                ax.plot(data["AIRMASS"], data["MODELMAG"] - data["OBSMAG"], ".",
-                        c="0.9", label="All")
-                idx = np.where(data["DATE"]==night)[0]
-                stars = set(data["STAR"][idx])
-                symbols = ["o", "s", "^", "x", ""]
-                for j,star in enumerate(stars):
-                    idx = np.where((data["DATE"] == night) &
-                                   (data["STAR"]==star))[0]
-                    ax.plot(data["AIRMASS"][idx],
-                            data["MODELMAG"][idx] - data["OBSMAG"][idx],
-                            marker=symbols[j], c=colors[i],
-                            label=star.upper().replace("_", "\_"),
-                            ls="none")
-                # Plot results based on traces
-                idxfile = os.path.join(wdir, "index_night_{}.yaml".format(band))
-                if not os.path.exists(idxfile):
-                    continue
-                with open(idxfile, "r") as f:
-                    ndct = yaml.load(f, Loader=yaml.FullLoader)
-                if night not in ndct.keys():
-                    continue
-                idx = ndct[night]
-                zps = traces[band]["zp"][:,idx]
-                ks = traces[band]["kappa"][:,idx]
-                y = zps[:, None] - np.outer(ks, X)
-                ylower = np.percentile(y, alpha, axis=0)
-                yupper = np.percentile(y, 100 - alpha, axis=0)
-                ax.plot(X, zps.mean() - X * ks.mean(), "-", c=colors[i],
-                        label="Model")
-                ax.fill_between(X, ylower, yupper, color=colors[i], alpha=0.5)
-                leg = ax.legend(prop = {'size': 5}, loc=4)
-                leg.set_title(band, prop={"size": 5})
-                if i < 9:
-                    ax.xaxis.set_ticklabels([])
-            plt.subplots_adjust(left=0.07, right=0.98, hspace=0.05, top=0.95,
-                                bottom=0.08, wspace=0.2)
-            pdf.savefig()
-            plt.close()
-
 def load_traces(db):
     params = ["zp", "kappa"]
     if not os.path.exists(db):
@@ -289,66 +209,129 @@ def plot_zps_global(flux_key):
     plt.show()
     return
 
-def compare_zps(flux_key="FLUX_AUTO", update=False):
-    zpsla = Table.read(os.path.join(context.tables_dir, "ZP_finals.cat"),
-                          format="ascii")
-    zptable = os.path.join(os.path.join(context.tables_dir,
-                                        "zps_tiles_{}.fits".format(flux_key)))
-    if not os.path.exists(zptable) or update:
-        zp_files_dir = os.path.join(os.path.join(context.data_dir, "tiles_zps"))
-        filenames = os.listdir(zp_files_dir)
-        fields = sorted(set([_.split("_")[0] for _ in filenames]))
-        zps = []
-        for field in fields:
-            zpsfield = np.zeros(12) * np.nan
-            for i, band in enumerate(context.bands):
-                fname = os.path.join(zp_files_dir, "{}_{}_single.fits".format(
-                    field, band))
-                if not os.path.exists(fname):
-                    continue
-                t = Table.read(fname, format="fits")
-                idx = np.where(t["phot"]==flux_key)
-                zpsfield[i] = t["zp"][idx]
-            zps.append(zpsfield)
-        zps = np.array(zps)
-        zps = Table(zps, names=context.bands)
-        fields = Table([fields], names=["Field"])
-        zps = hstack([fields, zps])
-        zps.write(zptable, overwrite=True)
-    zps = Table.read(zptable, format="fits")
-    zps.rename_column("FIELD", "Field")
-    fields = np.intersect1d(zpsla["Field"].data, zps["Field"].data)
-    idx = [np.where(zps["Field"] == field)[0][0] for field in fields]
-    zps = zps[idx]
-    idx = [np.where(zpsla["Field"] == field)[0][0] for field in fields]
-    zpsla = zpsla[idx]
-    ax = plt.subplot(1,1,1)
+def comparison_sdss():
+    """ Compares our zero points with those from SDSS. """
+    ivezic_table = os.path.join(context.tables_dir,
+                                "SDSS_S82_stars_Ivezic+07.fits")
+    ivezic = Table.read(ivezic_table)
+    tiles_dir = os.path.join(context.data_dir, "tiles")
+    tiles = os.listdir(tiles_dir)
     cmap = cm.get_cmap("Spectral_r")
     colors = [cmap(i) for i in np.linspace(0, 1, 12)]
-    for i,band in enumerate(context.bands):
-        if i in [0, 11]:
-            continue
-        diff = zps[band] - zpsla["ZP_{}".format(band).replace("F", "")]
-        plt.errorbar(i, np.nanmean(diff), yerr=np.nanstd(diff), c=colors[i],
-                     fmt="o")
-    plt.ylim(-.2, .5)
-    plt.xlim(0, 11)
-    plt.xticks(np.arange(12), context.bands)
-    plt.axhline(y=0, ls="--", c="k")
-    plt.ylabel("$\Delta$ zp")
-    plt.xlabel("Filter")
-    plt.title("Comparison for {} tiles.".format(len(zps)))
-    plt.subplots_adjust(left=0.09, right=0.98, bottom=0.08, top=0.92)
-    plt.savefig(os.path.join(context.plots_dir, "comparison_laura.png"))
+    bands = ["G", "R", "I"]
+    fig = plt.figure(figsize=(6.5, 3.3))
+    outdir = os.path.join(context.plots_dir, "comparison_ivezic")
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+    tiles = [_ for _ in os.listdir(tiles_dir) if _.startswith("STRIPE")]
+    for tile in tqdm(tiles):
+        wdir = os.path.join(tiles_dir, tile)
+        output = os.path.join(outdir, "{}.png".format(tile))
+        for j, band in enumerate(bands):
+            catfile = os.path.join(wdir,
+                                   "{}_{}_single_catalog.fits".format(tile,
+                                                                      band))
+            if not os.path.exists(catfile):
+                continue
+            cat = Table.read(catfile)
+            c0 = SkyCoord(ra=cat["ALPHA_J2000"] * u.degree,
+                          dec=cat["DELTA_J2000"] * u.degree)
+            c1 = SkyCoord(ra=ivezic["RAJ2000"], dec=ivezic["DEJ2000"])
+            idx, d2d, d3d = c0.match_to_catalog_sky(c1)
+            goodidx = np.where(d2d.to("arcsec").value < 1.)[0]
+            splus = cat[goodidx]
+            sdss = ivezic[idx][goodidx]
+            diff = splus["MAG_AUTO"] - sdss["{}mag".format(band.lower())]
+            diff = diff[sdss["rmag"] < 18]
+            diff = diff[np.abs(diff) < 0.3]
+            median = np.mean(diff)
+            std = np.std(diff)
+            ax = plt.subplot(1, 3, j + 1)
+            ax.hist(diff, bins=31,
+                    label=band.lower(),
+                    color=colors[context.bands.index(band)],
+                    range=(-0.3, 0.3))
+            ax.axvline(x=median, c="k", ls="--",
+                       label="median={:.2f} ({:.2f})".format(median, std))
+            ax.set_xlabel("SPLUS - SDSS")
+            ax.set_ylabel("frequency")
+            plt.legend(prop={"size": 6})
+        fig.suptitle(tile)
+        plt.subplots_adjust(wspace=0.3, right=0.98, bottom=0.15, left=0.1)
+        plt.savefig(output, dpi=250)
+        plt.clf()
+
+def compare_zps_kadu_laura():
+    phots = ["FLUX_AUTO", "FLUX_APER"]
+    wdir = "/home/kadu/Dropbox/SPLUS/stdcal/stdcal"
+    zp_dir = os.path.join(wdir, "zeropoints/tiles")
+    plots_dir = os.path.join(wdir, "plots")
+    if not os.path.exists(plots_dir):
+        os.mkdir(plots_dir)
+    zps = []
+    stripe82 = [_ for _ in os.listdir(zp_dir) if _.startswith("STRIPE82")]
+    for zptable in stripe82:
+        zps.append(Table.read(os.path.join(zp_dir, zptable)))
+    zps = vstack(zps)
+    cmap = cm.get_cmap("Spectral_r")
+    for phot in phots:
+        data = zps[zps["FLUXTYPE"]==phot]
+        means, stds, obands = [], [], []
+        fig = plt.figure(figsize=(12,8))
+        for i, band in enumerate(context.bands):
+            idx = np.where(data["FILTER"]==band)[0]
+            if len(idx) == 0:
+                continue
+            ax = plt.subplot(4, 3, i+1)
+            c = cmap(i / 12.)
+            d = data[idx]
+            zp_laura, zperr_laura = [], []
+            for tile in d["TILE"]:
+                zp_laura.append(misc.get_zps_dr1(tile, [band])[0])
+                zperr_laura.append(misc.get_zps_dr1(tile, [band],
+                                                 field="sigZP")[0])
+            zp_laura = np.array(zp_laura)
+            zperr_laura = np.array(zperr_laura)
+            diff = d["ZP"].data - zp_laura
+            differr = np.sqrt(d["ZPERR"].data**2 + zperr_laura**2)
+            weights = np.power(differr, -2)
+            m = np.average(diff, weights=weights, axis=-1)
+            sigm = np.sqrt(np.sum(np.power(weights * differr, 2), axis=-1))\
+                      / \
+                       np.sum(weights, axis=-1)
+            std = np.std(diff)
+            plt.errorbar(d["ZP"], diff, yerr=differr, fmt="o", c=c, label=band)
+            plt.axhline(y=m, ls="--", c="k")
+            plt.axhline(y=m + std,  ls=":", c="k")
+            plt.axhline(y=m - std, ls=":", c="k")
+            ax.legend()
+            print(band, m, std)
+            obands.append(band)
+            means.append(m)
+            stds.append(std)
+        fig.add_subplot(111, frameon=False)
+        plt.tick_params(labelcolor='none', top=False, bottom=False, left=False,
+                        right=False, which="both")
+        plt.ylabel("$\Delta m_0$ (Kadu - Laura)", labelpad=15, size=20)
+        plt.xlabel("mag", size=20, labelpad=5)
+        plt.subplots_adjust(left=0.07, right=0.99, bottom=0.08, top=0.95,
+                            wspace=0.13)
+        plt.title(phot.replace("_", "\_"), fontdict = {'fontsize' : 20})
+        plt.savefig(os.path.join(plots_dir, "zpdiff_bands-{}.png".format(
+            phot)), dpi=200)
+        plt.close()
+        fig = plt.figure()
+        ax = plt.subplot(111)
+        ax.errorbar(obands, means, yerr=stds, fmt="o")
+        ax.axhline(y=0, ls="--", c="k")
+        plt.ylabel("$\Delta m_0$ (Kadu - Laura)")
+        plt.xlabel("Filter")
+        plt.title(phot.replace("_", "\_"))
+        plt.show()
 
 if __name__ == "__main__":
-    config_files = ["config_mode5.yaml", "config_mode0.yaml"]
-    for filename in config_files:
-        with open(filename) as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
-        for flux in ["FLUX_APER", "FLUX_AUTO"]:
-            plot_zps_nights(config, flux)
-
+    compare_zps_kadu_laura()
+    # comparison_sdss()
     # std_star_gantt_chart()
     # compare_kappas()
     # compare_zps()
