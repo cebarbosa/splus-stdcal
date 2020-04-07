@@ -243,10 +243,10 @@ def main(survey=None):
         # for tile in tiles:
         #     calib_tile(config, bands, zptables, tile)
         f = partial(calib_tile, config, bands, zptables)
-        pool = Pool(4)
+        pool = Pool(2)
         pool.map(f, tiles)
     if os.path.exists(tmp_dir):
         os.rmdir(tmp_dir)
 
 if __name__ == "__main__":
-    main(survey="STRIPE82")
+    main()
