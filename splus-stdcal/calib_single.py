@@ -104,13 +104,15 @@ def calib_no_outliers(nstars=3, noutliers=0):
         print("Config file {} / {}".format(j+1, len(config_files)))
         with open(config_file, "r") as f:
             config = yaml.load(f)
+        ########################################################################
+        # Setting up directories
         calib_dir = os.path.join(config["main_dir"], "calib")
-        outdir = os.path.join(config["main_dir"], "zeropoints")
-        if not os.path.exists(outdir):
-            os.mkdir(outdir)
-        single_dir_out = os.path.join(outdir, "single")
-        if not os.path.exists(single_dir_out):
-            os.mkdir(single_dir_out)
+        zps_dir = os.path.join(config["main_dir"], "zeropoints")
+        out_dir = os.path.join(zps_dir, "single")
+        for _dir in [zps_dir, out_dir]:
+            if not os.path.exists(_dir):
+                os.mkdir(_dir)
+        ########################################################################
         calibs = [_ for _ in os.listdir(calib_dir) if _.startswith(
                           config["name"])]
         latest = sorted(calibs)[-1]
@@ -119,10 +121,18 @@ def calib_no_outliers(nstars=3, noutliers=0):
             print("Processing photometry mode {}".format(phot))
             fname = os.path.join(calib_dir, latest, phot, "zps-dates.fits")
             zpdata = load_date_zps(fname)
-            output = os.path.join(single_dir_out, "{}-{}.fits".format(
+            output = os.path.join(out_dir, "{}-{}.fits".format(
                                   config["name"], phot))
+            phot_dir = os.path.join(out_dir, phot)
+            if not os.path.exists(phot_dir):
+                os.mkdir(phot_dir)
             outtable = []
             for i, (date, params) in enumerate(tqdm(zpdata.items())):
+                datefile = os.path.join(phot_dir, "{}.fits".format(date))
+                if os.path.exists(datefile):
+                    t = Table.read(datefile)
+                    outtable.append(t)
+                    continue
                 zp = params["zp"]
                 zperr = params["zperr"]
                 kappa = params["kappa"]
@@ -133,6 +143,7 @@ def calib_no_outliers(nstars=3, noutliers=0):
                 if not os.path.exists(data_dir):
                     continue
                 singles = sorted(os.listdir(data_dir))
+                datedata = []
                 for single in singles:
                     t = Table()
                     catfile = os.path.join(data_dir, single)
@@ -158,7 +169,12 @@ def calib_no_outliers(nstars=3, noutliers=0):
                     t["GAIN"] = [float(hdict["GAIN"][0])]
                     t["ZP"] = [np.round(m0, 5)]
                     t["ZPERR"] = [np.round(m0err, 5)]
-                    outtable.append(t)
+                    datedata.append(t)
+                if len(datedata) == 0:
+                    continue
+                datedata = vstack(datedata)
+                datedata.write(datefile)
+                outtable.append(datedata)
             outtable = vstack(outtable)
             outtable.write(output, format="fits", overwrite=True)
 
