@@ -13,6 +13,7 @@ from __future__ import print_function, division
 import os
 import sys
 import yaml
+from datetime import date
 
 import numpy as np
 import astropy.units as u
@@ -86,9 +87,10 @@ def single_band_calib(data, outdb, redo=False):
         # Model error
         eps = pm.HalfCauchy(r"eps", 5)
         # Expected value
-        linear_regress = zp[data["night"]] - kappa[data["night"]] * data[
-            "AIRMASS"]
-        pm.Cauchy('y', alpha=linear_regress, beta=eps, observed=data["DELTAMAG"])
+        linear_regress = zp[data["night"]] - \
+                         kappa[data["night"]] * data["AIRMASS"]
+        pm.Cauchy('y', alpha=linear_regress, beta=eps,
+                  observed=data["DELTAMAG"])
         trace = pm.sample(nchains=4, njobs=4)
     pm.save_trace(trace, outdb, overwrite=True)
     summary = []
@@ -113,15 +115,19 @@ def single_band_calib(data, outdb, redo=False):
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
     if len(config_files) == 0:
-        config_files = ["config_mode0.yaml", "config_mode5.yaml"]
-        print("Configuration file not found. Using modes 0 and 5.")
-
+        config_files = ["config_mode5.yaml"]
+        print("Configuration file not set. Using default mode 5.")
     for filename in config_files:
         with open(filename) as f:
             config = yaml.load(f)
-        phot_file = os.path.join(config["output_dir"],
+        calib_dir = os.path.join(config["main_dir"], "calib")
+        phot_file = os.path.join(calib_dir,
                                 "phottable_{}.fits".format(config["name"]))
         phot = Table.read(phot_file)
+        # Setting up the output directory
+        today = date.today()
+        outdir = os.path.join(calib_dir, "{}-{}".format(
+                              config["name"], today.strftime("%Y-%m-%d")))
         ########################################################################
         # Remove flagged stars
         flagged_stars = [_.lower().replace(" ", "") for _ in config[
@@ -153,15 +159,16 @@ def main():
                 idx = np.where((phot["STAR"]==star) & (phot["FILTER"]==band))[0]
                 modelmag[idx] = float(model_mags[star][fname])
         phot["MODELMAG"] = modelmag
-        for flux in ["FLUX_APER", "FLUX_AUTO"]:
+        if not os.path.exists(outdir):
+            os.mkdir(outdir)
+        for flux in config["sex_phot"]:
             p = Table(phot, copy=True)
             p["OBSMAG"] = -2.5 * np.log10(p[flux] / p["EXPTIME"])
             p["DELTAMAG"] = p["MODELMAG"] - p["OBSMAG"]
             ####################################################################
             # Removing problematic lines
             p = p[np.isfinite(p["DELTAMAG"])]
-            dbs_dir = os.path.join(config["output_dir"],
-                                   "zps-{}-{}".format(config["name"], flux))
+            dbs_dir = os.path.join(outdir, flux)
             if not os.path.exists(dbs_dir):
                 os.mkdir(dbs_dir)
             for band in context.bands:
