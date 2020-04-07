@@ -11,6 +11,7 @@ from __future__ import print_function, division
 import os
 import sys
 import yaml
+from datetime import date
 from subprocess import call
 
 import numpy as np
@@ -112,7 +113,7 @@ def run_sextractor(data_dir, nights, redo=False):
                   "-FILTER_NAME", filter_file, "-STARNNW_NAME", starnnw_file,
                   "-CATALOG_NAME", sexcat])
 
-def join_tables(data_dir, nights, output, rtol=5, redo=True):
+def join_tables(data_dir, nights, output, rtol=5):
     """ Join standard star catalogs into one table. """
     header_keys = ["DATE", "IMAGE", "OBJECT", "FILTER", "EXPTIME", "GAIN",
                    "AIRMASS"]
@@ -150,14 +151,15 @@ def join_tables(data_dir, nights, output, rtol=5, redo=True):
 def main():
     config_files = [_ for _ in sys.argv if _.endswith(".yaml")]
     if len(config_files) == 0:
-        default_file = "config_mode0.yaml"
+        default_file = "config_mode5.yaml"
         print("Using default config file ({})".format(default_file))
         config_files.append(default_file)
     for filename in config_files:
         with open(filename) as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
-        if not os.path.exists(config["output_dir"]):
-            os.mkdir(config["output_dir"])
+            config = yaml.load(f)
+        calib_dir = os.path.join(config["main_dir"], "calib")
+        if not os.path.exists(calib_dir):
+            os.mkdir(calib_dir)
         # Set nights that will be calibrated
         nights = misc.select_nights(config)
         # Removing nights without standard stars
@@ -165,14 +167,13 @@ def main():
                   any(s.startswith("EXTMONI") and s.endswith("_proc.fits")
                for s in os.listdir(os.path.join(config["singles_dir"], night)))]
         nights = sorted(nights)
-        extmoni_dir = os.path.join(config["output_dir"], "extmoni")
+        extmoni_dir = os.path.join(config["main_dir"], "extmoni")
         if not os.path.exists(extmoni_dir):
             os.mkdir(extmoni_dir)
         make_std_cutout(nights, config["singles_dir"], extmoni_dir,
                           cutout_size=config["cutout_size"])
         run_sextractor(extmoni_dir, nights, redo=config["sex_redo"])
-
-        outtable = os.path.join(config["output_dir"],
+        outtable = os.path.join(calib_dir,
                                 "phottable_{}.fits".format(config["name"]))
         join_tables(extmoni_dir, nights, outtable, rtol=config["rtol"])
     print("Done!")
