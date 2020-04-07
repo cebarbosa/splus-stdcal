@@ -16,6 +16,8 @@ from datetime import datetime
 import numpy as np
 from astropy.table import Table, vstack, hstack
 
+import context
+
 def mag(f):
     return -2.5 * np.log10(f)
 
@@ -46,6 +48,17 @@ def select_nights(config):
         if first_night <= night <= last_night:
             nights.append(direc)
     return nights
+
+def get_zps_dr1(tile, bands=None, field="ZP"):
+    """ Read the table containing the zero points for a given tile and given
+    bands. """
+    bands = context.bands if bands is None else bands
+    zpfile = os.path.join("/home/kadu/Dropbox/SPLUS/stdcal/stdcal",
+                          "ZPfiles_Feb2019", "{}_ZP.cat".format(tile))
+    zpdata = Table.read(zpfile, format="ascii")
+    zpdict = dict([(t["FILTER"], t[field]) for t in zpdata])
+    zps = np.array([zpdict[band] for band in bands])
+    return zps
 
 
 if __name__ == "__main__":
