@@ -32,8 +32,7 @@ def run_sextractor_single(data_dir, outdir, night, redo=False):
     if not os.path.exists(wdir):
         return
     images = sorted([_ for _ in os.listdir(wdir) if
-                     _.endswith("_proc.fits") and
-                     not _.startswith("EXTMONI")])
+                     _.endswith("_proc.fits") and not _.startswith("EXTMONI")])
     for img in images:
         imgfile = os.path.join(wdir, img)
         cat_dir = os.path.join(outdir, night)
@@ -63,10 +62,10 @@ def main():
         # Set nights that will be calibrated
         nights = misc.select_nights(config)
         # Run sextractor to produce catalogs
-        singles_dir = os.path.join(config["output_dir"], "single")
-        if not os.path.exists(singles_dir):
-            os.mkdir(singles_dir)
-        f = partial(run_sextractor_single, config["singles_dir"], singles_dir)
+        out_dir = os.path.join(config["output_dir"], "single")
+        if not os.path.exists(out_dir):
+            os.mkdir(out_dir)
+        f = partial(run_sextractor_single, config["singles_dir"], out_dir)
         pool = Pool(8)
         pool.map(f, nights)
 
